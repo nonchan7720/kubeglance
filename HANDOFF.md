@@ -48,6 +48,7 @@ mise run run                    # real cluster via your kubeconfig
 ```
 
 - Work on a branch, open a **draft PR** with a Conventional Commits title; never push to `main`.
+- **Related PRs are a GitHub stacked PR**, not just PRs whose bases point at each other: each PR's base is the branch of the one below it, and the chain is registered as a stack (Stacked PRs are enabled on this repository). From a Claude Code cloud session `gh pr` (GraphQL) is blocked, so use the REST API: `gh api -X POST repos/nonchan7720/kubeglance/stacks -f 'pull_requests[]=…'` with the PR numbers bottom to top (or `--input` a JSON body `{"pull_requests":[…]}`), `POST …/stacks/{n}/add` for a new top, `GET …/stacks?pull_request={n}` to check. Bring a lower PR's changes up the stack by merging its branch into the one above (no force-push), and push each.
 - claude-hook-gate runs fmt/vet/package tests after every edit and the full `ci` before you stop. If `depgraph watch --root .` is running, it also blocks on new import cycles, layer violations and duplicated code. Do not weaken `.claude/gate.yaml` to get past a failure.
 - Tests first. The domain package is pure; its statistics are checked against hand-computed values (see `pkg/domain/stats_test.go`): keep that style.
 - Edit `README.md` and `README_ja.md` together (a gate rule fails when only one changed).
