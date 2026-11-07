@@ -73,7 +73,8 @@ UI が表示するものはすべて `/api/v1` 配下の JSON です。各エン
 | `GET /api/v1/pods?namespace=&node=&workload=ns/Kind/name` | Pod ごと: 使用量統計、使用量/limits 比、使用量/requests 比。ウィンドウ内に消えた Pod も含み、フラグ付き |
 | `GET /api/v1/pods/{namespace}/{name}` | 1 つの Pod と、その各コンテナ（spec 順）: コンテナ自身の requests / limits に対する使用量統計。履歴にない Pod は 404 |
 | `GET /api/v1/status` | バージョン、間隔、保持期間、コレクタの健全性 |
-| `GET /healthz`, `GET /readyz` | liveness。readiness は最初のラウンドを収集してから |
+| `GET /healthz`, `GET /readyz` | liveness。readiness はピアからのコピーと最初のラウンドの収集が済んでから |
+| `GET /metrics` | kubeglance 自身の Prometheus 向けメトリクス: ポーリング回数・失敗数・所要時間・最終成功時刻・現在の間隔・履歴の大きさ（Pod・ノード・系列・サンプル数・容量）。`networkPolicy.enabled` のときは Prometheus を `networkPolicy.ingressFrom` に加える |
 | `GET /internal/snapshot` | 履歴全体（ピアがコピーするもの） |
 
 統計は生サンプルから計算し、「平均の平均」は使いません。各統計オブジェクトの `coverage` はウィンドウのうちサンプルがある割合で、UI は欠損を隠さず表示します。

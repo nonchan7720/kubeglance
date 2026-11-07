@@ -19,10 +19,12 @@ type Collector struct {
 	log    *slog.Logger
 	now    func() time.Time
 
-	mu          sync.RWMutex
-	lastSuccess time.Time
-	lastError   error
-	rounds      int
+	mu           sync.RWMutex
+	lastSuccess  time.Time
+	lastError    error
+	rounds       int
+	errors       int
+	lastDuration time.Duration
 
 	// following metrics-server's resolution (off when --interval is set)
 	follow    bool
@@ -101,11 +103,15 @@ func nextPoll(last, now time.Time, interval time.Duration) time.Time {
 func (c *Collector) PollOnce(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, c.store.Interval())
 	defer cancel()
+	start := c.now()
 	round, err := c.source.Poll(ctx)
+	took := c.now().Sub(start)
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.lastDuration = took
 	if err != nil {
 		c.lastError = err
+		c.errors++
 		c.log.Warn("poll failed", "err", err)
 		return
 	}
@@ -146,13 +152,17 @@ type Health struct {
 	LastError   string    `json:"lastError,omitempty"`
 	Rounds      int       `json:"rounds"`
 	Healthy     bool      `json:"healthy"` // a success within two intervals
+	// Errors counts failed polls since start; LastDuration is how long the
+	// last poll (success or not) took. Both are for /metrics.
+	Errors       int           `json:"errors"`
+	LastDuration time.Duration `json:"lastDuration"`
 }
 
 // Health returns the current health.
 func (c *Collector) Health() Health {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	h := Health{LastSuccess: c.lastSuccess, Rounds: c.rounds}
+	h := Health{LastSuccess: c.lastSuccess, Rounds: c.rounds, Errors: c.errors, LastDuration: c.lastDuration}
 	if c.lastError != nil {
 		h.LastError = c.lastError.Error()
 	}

@@ -264,6 +264,35 @@ func infos[K comparable, I any](m map[K]*entry[I], cmp func(a, b I) int) []I {
 	return out
 }
 
+// StoreSize is how much the store holds, for kubeglance's own /metrics.
+type StoreSize struct {
+	Pods     int `json:"pods"` // in history, removed ones included until pruned
+	Nodes    int `json:"nodes"`
+	Series   int `json:"series"`   // pod, node and per-container series
+	Samples  int `json:"samples"`  // across all series
+	Capacity int `json:"capacity"` // samples each series can hold
+}
+
+// Size counts what the store holds.
+func (s *Store) Size() StoreSize {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	z := StoreSize{Pods: len(s.pods), Nodes: len(s.nodes), Capacity: s.capacity()}
+	for _, e := range s.pods {
+		z.Series++
+		z.Samples += e.series.Len()
+		for _, c := range e.containers {
+			z.Series++
+			z.Samples += c.Len()
+		}
+	}
+	for _, e := range s.nodes {
+		z.Series++
+		z.Samples += e.series.Len()
+	}
+	return z
+}
+
 // Pod returns a pod's metadata (also for a removed pod still in history).
 func (s *Store) Pod(k PodKey) (PodInfo, bool) {
 	s.mu.RLock()

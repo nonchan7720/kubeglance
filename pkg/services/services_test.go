@@ -549,3 +549,27 @@ func TestPodDetailBreaksDownContainers(t *testing.T) {
 		t.Error("unknown pod found")
 	}
 }
+
+func TestCollectorCountsErrorsAndTimesPolls(t *testing.T) {
+	s := domain.NewStore(15*time.Second, time.Minute)
+	src := &fakeSource{rounds: []domain.Round{{At: at(0), Pods: map[domain.PodKey]domain.Resource{web1: {CPU: 1}}}}}
+	c := NewCollector(s, src, nil)
+	clock := []time.Time{at(0), at(2)} // start, end of the first poll: 2 s
+	c.now = func() time.Time {
+		t := clock[0]
+		if len(clock) > 1 {
+			clock = clock[1:]
+		}
+		return t
+	}
+	c.PollOnce(context.Background())
+	if h := c.Health(); h.Rounds != 1 || h.Errors != 0 || h.LastDuration != 2*time.Second {
+		t.Errorf("after a success: %+v", h)
+	}
+	src.err = errors.New("down")
+	c.PollOnce(context.Background())
+	c.PollOnce(context.Background())
+	if h := c.Health(); h.Rounds != 1 || h.Errors != 2 {
+		t.Errorf("after two failures: %+v", h)
+	}
+}

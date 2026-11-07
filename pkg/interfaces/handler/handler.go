@@ -42,6 +42,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /internal/snapshot", h.snapshot)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /readyz", h.ready)
+	mux.HandleFunc("GET /metrics", h.metrics)
 	mux.Handle("GET /", ui.Handler())
 	return h.wrap(mux)
 }
