@@ -29,6 +29,9 @@ type Config struct {
 	SnapshotEvery time.Duration
 	ShutdownGrace time.Duration
 	LogLevel      string
+	// BootstrapTimeout is how long a starting replica keeps trying to copy
+	// the history from a peer before it starts without it.
+	BootstrapTimeout time.Duration
 }
 
 // RunFunc starts kubeglance with a parsed Config. It lives in main, which
@@ -84,18 +87,20 @@ a flag on the command line wins over the variable.`,
 	f.DurationVar(&c.SnapshotEvery, "snapshot-every", time.Minute, "how often to write the snapshot")
 	f.DurationVar(&c.ShutdownGrace, "shutdown-grace", 5*time.Second, "time to keep serving peers after SIGTERM so a new replica can copy the history")
 	f.StringVar(&c.LogLevel, "log-level", "info", "debug | info | warn | error")
+	f.DurationVar(&c.BootstrapTimeout, "bootstrap-timeout", 2*time.Minute, "how long a starting replica retries copying the history from a peer before it starts without it (it is not Ready meanwhile)")
 
 	for flag, key := range map[string]string{
-		"addr":           "KUBEGLANCE_ADDR",
-		"interval":       "KUBEGLANCE_INTERVAL",
-		"retention":      "KUBEGLANCE_RETENTION",
-		"peer-host":      "KUBEGLANCE_PEER_HOST",
-		"peer-port":      "KUBEGLANCE_PEER_PORT",
-		"pod-ip":         "POD_IP",
-		"snapshot":       "KUBEGLANCE_SNAPSHOT",
-		"snapshot-every": "KUBEGLANCE_SNAPSHOT_EVERY",
-		"shutdown-grace": "KUBEGLANCE_SHUTDOWN_GRACE",
-		"log-level":      "KUBEGLANCE_LOG_LEVEL",
+		"addr":              "KUBEGLANCE_ADDR",
+		"interval":          "KUBEGLANCE_INTERVAL",
+		"retention":         "KUBEGLANCE_RETENTION",
+		"peer-host":         "KUBEGLANCE_PEER_HOST",
+		"peer-port":         "KUBEGLANCE_PEER_PORT",
+		"pod-ip":            "POD_IP",
+		"snapshot":          "KUBEGLANCE_SNAPSHOT",
+		"snapshot-every":    "KUBEGLANCE_SNAPSHOT_EVERY",
+		"shutdown-grace":    "KUBEGLANCE_SHUTDOWN_GRACE",
+		"log-level":         "KUBEGLANCE_LOG_LEVEL",
+		"bootstrap-timeout": "KUBEGLANCE_BOOTSTRAP_TIMEOUT",
 	} {
 		bindEnv(f, flag, key)
 	}

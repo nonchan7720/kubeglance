@@ -144,3 +144,63 @@ func TestSnapshotMergeDoesNotExceedCapacity(t *testing.T) {
 		t.Errorf("merged = %v, want newest 5", got)
 	}
 }
+
+func TestRecordUsesTheSlot(t *testing.T) {
+	s := newTestStore()
+	p := PodKey{"app", "web"}
+	s.Record(Round{At: at(7), Pods: map[PodKey]Resource{p: {CPU: 1}}, Nodes: map[string]Resource{"n1": {CPU: 2}}})
+	if got := s.PodSamples(p, time.Time{}); len(got) != 1 || !got[0].At.Equal(at(0)) {
+		t.Errorf("pod sample = %v, want at +0s", got)
+	}
+	if got := s.NodeSamples("n1", time.Time{}); len(got) != 1 || !got[0].At.Equal(at(0)) {
+		t.Errorf("node sample = %v, want at +0s", got)
+	}
+}
+
+func TestSlotIsTheIntervalGrid(t *testing.T) {
+	s := NewStore(15*time.Second, time.Hour)
+	for in, want := range map[int]int{0: 0, 7: 0, 14: 0, 15: 15, 22: 15, 44: 30, 45: 45} {
+		if got := s.Slot(at(in)); !got.Equal(at(want)) {
+			t.Errorf("Slot(+%ds) = %v, want +%ds", in, got, want)
+		}
+	}
+	// the grid is absolute, not relative to when a replica started, and
+	// does not depend on the location
+	jst := time.FixedZone("JST", 9*3600)
+	if got := s.Slot(at(22).In(jst)); !got.Equal(at(15)) {
+		t.Errorf("Slot in JST = %v", got)
+	}
+}
+
+func TestMergeOfReplicasPollingAtDifferentOffsetsDoesNotDuplicate(t *testing.T) {
+	// replica A polled at +0, +15, +30; replica B, started 7 s later and
+	// running a version that recorded raw poll times, at +7, +22, +37. Both
+	// read the same metrics-server values. The merged history must hold one
+	// sample per slot, not two, or the capacity would hold half the retention
+	// and coverage would hide gaps.
+	p := PodKey{"app", "web"}
+	a, b := newTestStore(), newTestStore()
+	for i := range 3 {
+		a.Record(Round{At: at(i * 15), Pods: map[PodKey]Resource{p: {CPU: int64(10 + i)}}})
+		b.Record(Round{At: at(i*15 + 7), Pods: map[PodKey]Resource{p: {CPU: int64(10 + i)}}})
+	}
+	dst := newTestStore()
+	dst.Merge(a.Snapshot())
+	dst.Merge(b.Snapshot())
+	got := dst.PodSamples(p, time.Time{})
+	if len(got) != 3 {
+		t.Fatalf("merged %d samples, want 3 (one per slot): %v", len(got), got)
+	}
+	for i, x := range got {
+		if !x.At.Equal(at(i*15)) || x.Usage.CPU != int64(10+i) {
+			t.Errorf("sample %d = %v, want +%ds cpu %d", i, x, i*15, 10+i)
+		}
+	}
+
+	// the store's own next round in the same slot as a merged sample is
+	// not a second sample either: Record slots too
+	dst.Record(Round{At: at(37), Pods: map[PodKey]Resource{p: {CPU: 99}}})
+	if n := len(dst.PodSamples(p, time.Time{})); n != 3 {
+		t.Errorf("after recording slot +30 again: %d samples", n)
+	}
+}

@@ -53,6 +53,7 @@ Flags, or the environment variable in brackets; a flag on the command line wins 
 | `--snapshot` (`KUBEGLANCE_SNAPSHOT`) | | optional gzip JSON file to persist the history to |
 | `--snapshot-every` (`KUBEGLANCE_SNAPSHOT_EVERY`) | `1m` | how often to write it |
 | `--shutdown-grace` (`KUBEGLANCE_SHUTDOWN_GRACE`) | `5s` | keep serving after SIGTERM so a new replica can finish copying |
+| `--bootstrap-timeout` (`KUBEGLANCE_BOOTSTRAP_TIMEOUT`) | `2m` | how long a starting replica retries copying the history while peers exist but none answers; it is not Ready meanwhile |
 | `--kubeconfig` | | out-of-cluster; else in-cluster, `$KUBECONFIG`, `~/.kube/config` |
 | `--log-level` (`KUBEGLANCE_LOG_LEVEL`) | `info` | `debug` / `info` / `warn` / `error` (JSON to stderr) |
 
@@ -89,9 +90,9 @@ plus the Go runtime, the HTTP server and the client-go caches (10–20 MB). The 
 metrics-server returns instant values only, so a gap in polling is a gap forever. kubeglance avoids gaps without a database:
 
 1. `replicas: 2`, `RollingUpdate` with `maxUnavailable: 0`, `maxSurge: 1`.
-2. A new pod resolves the headless Service `<release>-peers`, fetches `/internal/snapshot` from every other replica, merges it, then polls once and becomes Ready.
+2. A new pod resolves the headless Service `<release>-peers` (which lists Ready replicas only), fetches `/internal/snapshot` from every other replica and merges them, then polls once and becomes Ready. If peers exist but none answers, it looks them up again and retries until `--bootstrap-timeout` instead of becoming Ready with an empty history; meanwhile `/healthz` answers, so it is not restarted.
 3. Only then is an old pod terminated. It sleeps `preStopSleepSeconds` and keeps serving for `--shutdown-grace` after SIGTERM, so a copy in flight finishes.
-4. Both replicas poll the same metrics-server, so their histories are identical by construction; no leader, no consensus.
+4. Both replicas poll the same metrics-server, and every sample is recorded at its slot on an absolute grid of `--interval` (`:00`, `:15`, `:30`, `:45` for 15 s), not at the moment a replica happened to poll. Each replica polls in the middle of every slot, whenever it started. Two replicas therefore record the same instants, and merging their histories deduplicates instead of interleaving them; no leader, no consensus.
 
 The optional `--snapshot` file (`snapshot.enabled` in the chart) is a safety net for the case where every replica is down at once (a cluster reboot). It is not what makes updates lossless, and with k3s's node-local storage it cannot be: that is the peer copy.
 

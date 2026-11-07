@@ -57,9 +57,9 @@ mise run run                    # real cluster via your kubeconfig
 ## Things that are easy to get wrong
 
 - **`Series.Add` ignores a sample that is not newer than the last.** Merging (peer / disk) goes through `mergeSeries`, which sorts + dedupes by instant. Keep it that way; do not "fix" `Add` to accept out-of-order samples.
-- **Aggregation relies on every entity of one poll round sharing `Round.At`.** `convertRound` truncates to the second for that reason. If you ever add a second source, give it its own round timestamp, never per-pod timestamps.
+- **Every sample lives at its slot** (`Store.Slot`: the poll time rounded down to `--interval` on an absolute grid). `Record` and `Merge` both slot, and the collector polls in the middle of each slot (`nextPoll`). That is what makes two replicas' histories identical, so merging them deduplicates. It is also what aggregation relies on: every entity of one round shares the instant. Never store raw poll times, and never per-pod timestamps; if you add a second source, it goes through `Record` too.
 - **A deleted pod stays in the store until `Prune` drops it after the retention**, so a workload's history survives a rollout. `Query.Workloads` counts only live pods in `Pods` but sums every pod's samples. That is intentional.
-- **Readiness = first round recorded.** During a rolling update the peer copy happens *before* the first poll, so a Ready replica always has the full window.
+- **Readiness = peer copy done + first round recorded.** The HTTP server starts first (so `/healthz` keeps the liveness probe quiet), then `Bootstrap` copies from every Ready peer, retrying until `--bootstrap-timeout` when peers exist but none answers, and only then do the informers and the collector start. A Ready replica therefore has the full window, and copying from any one Ready replica is enough.
 - **The UI is embedded at build time** (`go:embed`). `go run ./internal/devserver` must be restarted to see static changes.
 - **UI strings live in `DICT` at the top of `app.js`** (en + ja, same keys). Every visible string goes through `t()`; static HTML uses `data-i18n` / `data-i18n-html`. Adding a language = adding one object.
 - **`Limits` is zeroed when any container has no limit** (`podInfo`): a pod is only as limited as its least limited container. The UI then shows "% of request" instead.

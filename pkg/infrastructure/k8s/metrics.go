@@ -25,10 +25,12 @@ func NewMetricsSource(c metricsclient.Interface) *MetricsSource {
 	return &MetricsSource{client: c}
 }
 
-// Poll implements services.MetricsSource. The round's timestamp is the poll
-// time, truncated to the second, so every entity of one round shares it and
-// aggregation by instant is exact.
+// Poll implements services.MetricsSource. The round's timestamp is when the
+// poll started, so a slow list call cannot push it into the next slot; the
+// store records it at its slot (domain.Store.Slot), which every entity of the
+// round and every replica polling in that slot share.
 func (m *MetricsSource) Poll(ctx context.Context) (domain.Round, error) {
+	start := time.Now()
 	nodes, err := m.client.MetricsV1beta1().NodeMetricses().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return domain.Round{}, fmt.Errorf("list node metrics: %w", err)
@@ -37,7 +39,7 @@ func (m *MetricsSource) Poll(ctx context.Context) (domain.Round, error) {
 	if err != nil {
 		return domain.Round{}, fmt.Errorf("list pod metrics: %w", err)
 	}
-	return convertRound(time.Now(), nodes, pods), nil
+	return convertRound(start, nodes, pods), nil
 }
 
 func convertRound(at time.Time, nodes *metricsv1beta1.NodeMetricsList, pods *metricsv1beta1.PodMetricsList) domain.Round {
