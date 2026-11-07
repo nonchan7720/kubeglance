@@ -38,6 +38,7 @@ rules:
     run:
       - { name: helm-lint, cmd: "command -v helm >/dev/null || exit 0; helm lint charts/kubeglance", files: false }
       - { name: helm-template, cmd: "command -v helm >/dev/null || exit 0; helm template kubeglance charts/kubeglance >/dev/null", files: false }
+      - { name: helm-render, cmd: "command -v helm >/dev/null || exit 0; bash charts/tests/render.sh", files: false }
 
   # README.md and README_ja.md must be edited together
   - match: ["README.md", "README_ja.md"]

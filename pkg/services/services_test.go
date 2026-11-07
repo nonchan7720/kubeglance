@@ -170,6 +170,32 @@ func TestPodsViewNoLimitIsZeroRatio(t *testing.T) {
 	}
 }
 
+func TestViewsCarrySparklines(t *testing.T) {
+	_, q := fixture(t)
+	// 30 min window ending at t0+45 s: 60 clock-aligned buckets of 30 s, the
+	// last two ([t0, t0+30), [t0+30, t0+60)) hold the 4 rounds; the 58
+	// before are gaps because the store has no older history.
+	last2 := func(t *testing.T, name string, sp domain.Spark, cpu int64) {
+		t.Helper()
+		if len(sp.CPU) != 60 || sp.Bucket != 30*time.Second {
+			t.Fatalf("%s: %d points of %v", name, len(sp.CPU), sp.Bucket)
+		}
+		if sp.CPU[0] != nil {
+			t.Errorf("%s: first point = %d, want gap", name, *sp.CPU[0])
+		}
+		for _, p := range sp.CPU[58:] {
+			if p == nil || *p != cpu {
+				t.Errorf("%s: last points = %v, want %d", name, sp.CPU[58:], cpu)
+			}
+		}
+	}
+	last2(t, "cluster", q.Cluster(30*time.Minute).Spark, 1500)
+	last2(t, "node n1", q.Nodes(30 * time.Minute).Nodes[0].Spark, 1000)
+	last2(t, "workload db", q.Workloads(30*time.Minute, "").Workloads[0].Spark, 400)
+	last2(t, "workload web", q.Workloads(30*time.Minute, "").Workloads[1].Spark, 200)
+	last2(t, "pod db-0", q.Pods(30*time.Minute, PodFilter{}).Pods[0].Spark, 400)
+}
+
 func TestWindowIsCappedToRetention(t *testing.T) {
 	_, q := fixture(t)
 	v := q.Cluster(48 * time.Hour)
@@ -466,5 +492,60 @@ func TestQueryCoverageAcrossAResolutionChange(t *testing.T) {
 	u := q.Cluster(100 * time.Second).Usage
 	if u.Samples != 10 || u.Expected != 10 || u.Coverage != 1 {
 		t.Errorf("usage samples %d expected %d coverage %v, want 10, 10, 1", u.Samples, u.Expected, u.Coverage)
+	}
+}
+
+func TestPodDetailBreaksDownContainers(t *testing.T) {
+	s := domain.NewStore(15*time.Second, time.Hour)
+	multi := domain.PodKey{Namespace: "app", Name: "web-1"}
+	single := domain.PodKey{Namespace: "app", Name: "db-0"}
+	s.UpsertPods([]domain.PodInfo{
+		{Key: multi, Requests: domain.Resource{CPU: 150}, Containers: []domain.ContainerInfo{
+			{Name: "proxy", Requests: domain.Resource{CPU: 50}, Limits: domain.Resource{CPU: 100}}, // spec order: proxy first
+			{Name: "app", Requests: domain.Resource{CPU: 100, Memory: 100}, Limits: domain.Resource{CPU: 200, Memory: 400}},
+		}},
+		{Key: single, Containers: []domain.ContainerInfo{{Name: "postgres", Requests: domain.Resource{CPU: 500}}}},
+	})
+	for i := range 4 {
+		s.Record(domain.Round{
+			At:   at(i * 15),
+			Pods: map[domain.PodKey]domain.Resource{multi: {CPU: int64(60 + i*10)}, single: {CPU: 400}},
+			// app: 40, 50, 60, 70; proxy: 20 every round
+			Containers: map[domain.PodKey]map[string]domain.Resource{multi: {"app": {CPU: int64(40 + i*10), Memory: 100}, "proxy": {CPU: 20}}},
+		})
+	}
+	q := NewQuery(s)
+	q.now = func() time.Time { return at(45) }
+
+	v, ok := q.Pod(30*time.Minute, multi)
+	if !ok {
+		t.Fatal("pod not found")
+	}
+	if v.Pod.Usage.Now.CPU != 90 || len(v.Pod.Spark.CPU) == 0 {
+		t.Errorf("pod = %+v", v.Pod)
+	}
+	if len(v.Containers) != 2 || v.Containers[0].Name != "proxy" || v.Containers[1].Name != "app" {
+		t.Fatalf("containers = %+v, want proxy then app (spec order)", v.Containers)
+	}
+	app := v.Containers[1]
+	// 40 50 60 70: avg 55, median (50+60)/2 = 55, p95 nearest-rank ceil(3.8)=4th = 70
+	if app.Usage.Now.CPU != 70 || app.Usage.Avg.CPU != 55 || app.Usage.Median.CPU != 55 || app.Usage.P95.CPU != 70 {
+		t.Errorf("app usage = %+v", app.Usage)
+	}
+	if app.LimitRatio.CPU != 0.35 || app.RequestRatio.CPU != 0.7 || app.LimitRatio.Memory != 0.25 {
+		t.Errorf("app ratios = limit %+v request %+v", app.LimitRatio, app.RequestRatio)
+	}
+	if v.Containers[0].Usage.Now.CPU != 20 || v.Containers[0].LimitRatio.CPU != 0.2 || len(v.Containers[0].Spark.CPU) == 0 {
+		t.Errorf("proxy = %+v", v.Containers[0])
+	}
+
+	// a single-container pod's container is the pod's own series
+	d, ok := q.Pod(30*time.Minute, single)
+	if !ok || len(d.Containers) != 1 || d.Containers[0].Name != "postgres" || d.Containers[0].Usage.Now.CPU != 400 || d.Containers[0].RequestRatio.CPU != 0.8 {
+		t.Errorf("single = %+v", d.Containers)
+	}
+
+	if _, ok := q.Pod(30*time.Minute, domain.PodKey{Namespace: "app", Name: "nope"}); ok {
+		t.Error("unknown pod found")
 	}
 }

@@ -149,3 +149,24 @@ func TestSnapshotCarriesTheTimeline(t *testing.T) {
 		t.Errorf("timeline from an old snapshot = %v", tl)
 	}
 }
+
+func TestContainerSeriesGrowWithAFinerInterval(t *testing.T) {
+	s := NewStore(15*time.Second, time.Minute) // capacity 5
+	p := PodKey{"app", "web"}
+	rec := func(sec int) {
+		s.Record(Round{At: at(sec), Pods: map[PodKey]Resource{p: {CPU: 1}},
+			Containers: map[PodKey]map[string]Resource{p: {"app": {CPU: 1}, "proxy": {CPU: 1}}}})
+	}
+	for _, sec := range []int{0, 15, 30, 45} {
+		rec(sec)
+	}
+	s.SetInterval(10*time.Second, at(45)) // capacity 7, from +50
+	for _, sec := range []int{50, 60, 70} {
+		rec(sec)
+	}
+	for name, got := range s.ContainerSamples(p, time.Time{}) {
+		if len(got) != 7 {
+			t.Errorf("container %s: %d samples, want all 7 (resized with the pod series)", name, len(got))
+		}
+	}
+}

@@ -17,11 +17,21 @@ import (
 	"github.com/nonchan7720/kubeglance/pkg/services"
 )
 
-type synth struct{ t time.Time }
+// synth makes up rounds. gapFrom..gapTo is a stretch with no data at all
+// (as if no replica could poll), so the UI's gap rendering has something to
+// show.
+type synth struct{ t, gapFrom, gapTo time.Time }
+
+// the web pods carry a proxy sidecar, so the Pod screen has a container
+// breakdown to show; their pod totals are the sums of these
+var webContainers = []domain.ContainerInfo{
+	{Name: "app", Requests: domain.Resource{CPU: 80, Memory: 96 << 20}, Limits: domain.Resource{CPU: 400, Memory: 192 << 20}},
+	{Name: "proxy", Requests: domain.Resource{CPU: 20, Memory: 32 << 20}, Limits: domain.Resource{CPU: 100, Memory: 64 << 20}},
+}
 
 var pods = []domain.PodInfo{
-	{Key: domain.PodKey{Namespace: "app", Name: "web-7d9f-abcde"}, Node: "k3s-1", Workload: domain.WorkloadKey{Namespace: "app", Kind: "Deployment", Name: "web"}, Requests: domain.Resource{CPU: 100, Memory: 128 << 20}, Limits: domain.Resource{CPU: 500, Memory: 256 << 20}, Phase: "Running"},
-	{Key: domain.PodKey{Namespace: "app", Name: "web-7d9f-fghij"}, Node: "k3s-2", Workload: domain.WorkloadKey{Namespace: "app", Kind: "Deployment", Name: "web"}, Requests: domain.Resource{CPU: 100, Memory: 128 << 20}, Limits: domain.Resource{CPU: 500, Memory: 256 << 20}, Phase: "Running"},
+	{Key: domain.PodKey{Namespace: "app", Name: "web-7d9f-abcde"}, Containers: webContainers, Node: "k3s-1", Workload: domain.WorkloadKey{Namespace: "app", Kind: "Deployment", Name: "web"}, Requests: domain.Resource{CPU: 100, Memory: 128 << 20}, Limits: domain.Resource{CPU: 500, Memory: 256 << 20}, Phase: "Running"},
+	{Key: domain.PodKey{Namespace: "app", Name: "web-7d9f-fghij"}, Containers: webContainers, Node: "k3s-2", Workload: domain.WorkloadKey{Namespace: "app", Kind: "Deployment", Name: "web"}, Requests: domain.Resource{CPU: 100, Memory: 128 << 20}, Limits: domain.Resource{CPU: 500, Memory: 256 << 20}, Phase: "Running"},
 	{Key: domain.PodKey{Namespace: "app", Name: "postgres-0"}, Node: "k3s-1", Workload: domain.WorkloadKey{Namespace: "app", Kind: "StatefulSet", Name: "postgres"}, Requests: domain.Resource{CPU: 500, Memory: 1 << 30}, Phase: "Running"},
 	{Key: domain.PodKey{Namespace: "argocd", Name: "argocd-repo-server-5c-xyz"}, Node: "k3s-3", Workload: domain.WorkloadKey{Namespace: "argocd", Kind: "Deployment", Name: "argocd-repo-server"}, Requests: domain.Resource{CPU: 250, Memory: 256 << 20}, Limits: domain.Resource{CPU: 1000, Memory: 1 << 30}, Phase: "Running"},
 	{Key: domain.PodKey{Namespace: "kube-system", Name: "traefik-abc"}, Node: "k3s-2", Workload: domain.WorkloadKey{Namespace: "kube-system", Kind: "Deployment", Name: "traefik"}, Requests: domain.Resource{CPU: 50, Memory: 64 << 20}, Limits: domain.Resource{CPU: 200, Memory: 128 << 20}, Phase: "Running"},
@@ -30,11 +40,19 @@ var pods = []domain.PodInfo{
 
 func (s *synth) Poll(context.Context) (domain.Round, error) {
 	s.t = s.t.Add(15 * time.Second)
-	r := domain.Round{At: s.t, Pods: map[domain.PodKey]domain.Resource{}, Nodes: map[string]domain.Resource{}}
+	r := domain.Round{At: s.t, Pods: map[domain.PodKey]domain.Resource{}, Nodes: map[string]domain.Resource{}, Containers: map[domain.PodKey]map[string]domain.Resource{}}
+	if !s.t.Before(s.gapFrom) && s.t.Before(s.gapTo) {
+		return r, nil
+	}
 	wave := 0.5 + 0.5*math.Sin(float64(s.t.Unix())/300)
 	for i, p := range pods {
 		base := float64(p.Requests.CPU) * (0.4 + wave*float64(i%3))
-		r.Pods[p.Key] = domain.Resource{CPU: int64(base + rand.Float64()*30), Memory: int64(float64(p.Requests.Memory)*0.8) + rand.Int64N(32<<20)} //nolint:gosec // synthetic data
+		u := domain.Resource{CPU: int64(base + rand.Float64()*30), Memory: int64(float64(p.Requests.Memory)*0.8) + rand.Int64N(32<<20)} //nolint:gosec // synthetic data
+		r.Pods[p.Key] = u
+		if len(p.Containers) > 1 {
+			proxy := domain.Resource{CPU: u.CPU / 5, Memory: 24 << 20}
+			r.Containers[p.Key] = map[string]domain.Resource{"proxy": proxy, "app": {CPU: u.CPU - proxy.CPU, Memory: u.Memory - proxy.Memory}}
+		}
 	}
 	r.Nodes["k3s-1"] = domain.Resource{CPU: int64(900 + wave*1800), Memory: 5<<30 + rand.Int64N(1<<29)}          //nolint:gosec
 	r.Nodes["k3s-2"] = domain.Resource{CPU: int64(400 + rand.Float64()*100), Memory: 2<<30 + rand.Int64N(1<<28)} //nolint:gosec
@@ -53,7 +71,8 @@ func main() {
 		{Name: "k3s-3", Ready: true, Allocatable: domain.Resource{CPU: 2000, Memory: 4 << 30}, Capacity: domain.Resource{CPU: 2000, Memory: 4 << 30}},
 	})
 	store.UpsertPods(pods)
-	src := &synth{t: time.Now().Add(-2 * time.Hour)}
+	now := time.Now()
+	src := &synth{t: now.Add(-2 * time.Hour), gapFrom: now.Add(-50 * time.Minute), gapTo: now.Add(-42 * time.Minute)}
 	col := services.NewCollector(store, src, log)
 	for range 480 { // two hours of history
 		col.PollOnce(context.Background())

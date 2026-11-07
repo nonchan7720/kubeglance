@@ -68,7 +68,9 @@ env = { CGO_ENABLED = "1" }
 run = "go test -race -count=1 ./..."
 
 [tasks."helm:lint"]
-run = ["helm lint charts/kubeglance", "helm template kubeglance charts/kubeglance >/dev/null"]
+# render.sh renders the value combinations that switch templates on and off
+# (PDB, NetworkPolicy) and checks what comes out
+run = ["helm lint charts/kubeglance", "helm template kubeglance charts/kubeglance >/dev/null", "bash charts/tests/render.sh"]
 
 [tasks.ci]
 description = "Everything CI runs"

@@ -1,0 +1,16 @@
+{{- if and .Values.podDisruptionBudget.enabled (gt (int .Values.replicaCount) 1) }}
+# Keeps one replica (and with it the history) through a node drain. Not
+# rendered for a single replica, where minAvailable: 1 would block every
+# drain.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "kubeglance.fullname" . }}
+  labels:
+    {{- include "kubeglance.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "kubeglance.selectorLabels" . | nindent 6 }}
+{{- end }}

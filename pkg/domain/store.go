@@ -27,6 +27,22 @@ type entry[I any] struct {
 	hasInfo   bool
 	deletedAt time.Time
 	series    *Series
+	// containers is the per-container history of a multi-container pod
+	// (nil otherwise, and always nil for nodes)
+	containers map[string]*Series
+}
+
+// container returns the series of one container, creating it.
+func (e *entry[I]) container(name string, capacity int) *Series {
+	if e.containers == nil {
+		e.containers = map[string]*Series{}
+	}
+	c, ok := e.containers[name]
+	if !ok {
+		c = NewSeries(capacity)
+		e.containers[name] = c
+	}
+	return c
 }
 
 // NewStore returns a store that keeps retention worth of samples taken every
@@ -115,6 +131,11 @@ func (s *Store) resize() {
 		if e.series.Cap() != c {
 			e.series = e.series.Resized(c)
 		}
+		for name, cs := range e.containers {
+			if cs.Cap() != c {
+				e.containers[name] = cs.Resized(c)
+			}
+		}
 	}
 	for _, e := range s.nodes {
 		if e.series.Cap() != c {
@@ -136,6 +157,12 @@ func (s *Store) Record(r Round) {
 	}
 	for n, u := range r.Nodes {
 		s.node(n).series.Add(Sample{At: at, Usage: u})
+	}
+	for k, cs := range r.Containers {
+		e := s.pod(k)
+		for name, u := range cs {
+			e.container(name, s.capacity()).Add(Sample{At: at, Usage: u})
+		}
 	}
 }
 
@@ -277,6 +304,24 @@ func (s *Store) PodSamples(k PodKey, from time.Time) []Sample {
 	return nil
 }
 
+// ContainerSamples returns the samples at or after from of each container
+// of a multi-container pod, by container name, oldest first. It is empty for
+// a single-container pod (its pod series is the container's) and nil for an
+// unknown pod.
+func (s *Store) ContainerSamples(k PodKey, from time.Time) map[string][]Sample {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	e, ok := s.pods[k]
+	if !ok {
+		return nil
+	}
+	out := make(map[string][]Sample, len(e.containers))
+	for name, c := range e.containers {
+		out[name] = c.Since(from)
+	}
+	return out
+}
+
 // Node returns a node's metadata.
 func (s *Store) Node(name string) (NodeInfo, bool) {
 	s.mu.RLock()
@@ -324,6 +369,9 @@ type PodSnapshot struct {
 	HasInfo   bool      `json:"hasInfo"`
 	DeletedAt time.Time `json:"deletedAt,omitzero"`
 	Samples   []Sample  `json:"samples"`
+	// Containers is absent in snapshots from replicas that predate it,
+	// which merge as pods without a container breakdown.
+	Containers map[string][]Sample `json:"containers,omitempty"`
 }
 
 // NodeSnapshot is one node in a Snapshot.
@@ -340,7 +388,14 @@ func (s *Store) Snapshot() Snapshot {
 	defer s.mu.RUnlock()
 	snap := Snapshot{TakenAt: time.Now(), Interval: s.timeline.Current(), Timeline: append(Timeline(nil), s.timeline...), Retention: s.retention}
 	for _, e := range s.pods {
-		snap.Pods = append(snap.Pods, PodSnapshot{Info: e.info, HasInfo: e.hasInfo, DeletedAt: e.deletedAt, Samples: e.series.All()})
+		ps := PodSnapshot{Info: e.info, HasInfo: e.hasInfo, DeletedAt: e.deletedAt, Samples: e.series.All()}
+		if len(e.containers) > 0 {
+			ps.Containers = make(map[string][]Sample, len(e.containers))
+			for name, c := range e.containers {
+				ps.Containers[name] = c.All()
+			}
+		}
+		snap.Pods = append(snap.Pods, ps)
 	}
 	for _, e := range s.nodes {
 		snap.Nodes = append(snap.Nodes, NodeSnapshot{Info: e.info, HasInfo: e.hasInfo, DeletedAt: e.deletedAt, Samples: e.series.All()})
@@ -364,7 +419,12 @@ func (s *Store) Merge(snap Snapshot) {
 	s.timeline = s.timeline.merge(in, newest(snap))
 	s.resize()
 	for _, p := range snap.Pods {
-		s.pod(p.Info.Key).merge(p.Info, p.HasInfo, p.DeletedAt, s.slotted(p.Samples), s.capacity())
+		e := s.pod(p.Info.Key)
+		e.merge(p.Info, p.HasInfo, p.DeletedAt, s.slotted(p.Samples), s.capacity())
+		for name, samples := range p.Containers {
+			e.container(name, s.capacity()) // so the map entry exists
+			e.containers[name] = mergeSeries(e.containers[name], s.slotted(samples), s.capacity())
+		}
 	}
 	for _, n := range snap.Nodes {
 		s.node(n.Info.Name).merge(n.Info, n.HasInfo, n.DeletedAt, s.slotted(n.Samples), s.capacity())

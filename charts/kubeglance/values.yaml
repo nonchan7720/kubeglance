@@ -84,6 +84,29 @@ topologySpreadConstraints:
       matchLabels:
         app.kubernetes.io/name: kubeglance
 
+# Keeps one replica through a node drain (minAvailable: 1). Rendered only
+# when replicaCount > 1.
+podDisruptionBudget:
+  enabled: true
+
+# Restricts traffic to what kubeglance needs. Off by default because what
+# "the Ingress controller" and "the API server" are differs per cluster.
+networkPolicy:
+  enabled: false
+  # NetworkPolicyPeers allowed to reach the UI / API on port 8080, besides
+  # the other replicas. Empty: only the replicas (kubectl port-forward is
+  # not subject to NetworkPolicy). For example the Ingress controller:
+  #   - namespaceSelector:
+  #       matchLabels:
+  #         kubernetes.io/metadata.name: ingress-nginx
+  ingressFrom: []
+  # The Kubernetes API server (it also serves metrics.k8s.io). Empty cidrs
+  # allow these ports to any address; pin them to the API server's address
+  # (`kubectl get endpoints kubernetes`) for a tighter policy.
+  apiServer:
+    cidrs: []
+    ports: [443, 6443]
+
 serviceAccount:
   create: true
   annotations: {}
