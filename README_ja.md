@@ -36,6 +36,10 @@ Argo CD なら、Application のソースを `oci://ghcr.io/nonchan7720/charts/k
 
 要件: Kubernetes 1.30 以上（preStop の `sleep` アクションのため。古いクラスタでは `preStopSleepSeconds: 0`）と metrics-server。
 
+レプリカが 2 つなら chart は PodDisruptionBudget（`minAvailable: 1`）も作るので、ノードの drain で両レプリカ（と履歴）が同時に消えることはありません。`networkPolicy.enabled: true` で NetworkPolicy を追加します。ingress は他のレプリカと `networkPolicy.ingressFrom`（Ingress コントローラ）から 8080 へ、egress は DNS・API サーバー（`networkPolicy.apiServer`。metrics API もここが提供）・レプリカへ。許可元はクラスタごとに違うので、既定ではオフです。
+
+最初のログ行 `starting` には、実際に使われる設定（フラグ・環境変数・既定値を合わせたもの）が `config` オブジェクトとして入ります。
+
 linux / darwin / windows（amd64, arm64, armv7）のバイナリは [Releases](https://github.com/nonchan7720/kubeglance/releases) にあります。クラスタ外からは `kubeglance --kubeconfig ~/.kube/config` で動かせます。
 
 ## 設定
