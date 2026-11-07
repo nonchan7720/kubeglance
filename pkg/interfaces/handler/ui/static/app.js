@@ -29,6 +29,7 @@
       'node.filter': (n) => `node ${n}`, 'workload.filter': (w) => `workload ${w}`,
       collecting: (s, v) => `collecting every ${s}s · ${v}`, 'collector.bad': (e) => `collector: ${e}`, 'no.data': 'no data yet',
       'ns.all': 'all namespaces', 'sort.by': 'sort by', 'sort.name': 'A–Z', 'spark.title': 'usage over the window; shaded = no data',
+      'pod.filter': (p) => `pod ${p}`, containers: 'Containers', 'no.containers': 'no per-container data for this pod yet',
     },
     ja: {
       'tab.cluster': 'クラスタ', 'tab.nodes': 'ノード', 'tab.workloads': 'ワークロード', 'tab.pods': 'Pod',
@@ -44,6 +45,7 @@
       'node.filter': (n) => `ノード ${n}`, 'workload.filter': (w) => `ワークロード ${w}`,
       collecting: (s, v) => `${s}秒ごとに収集中 · ${v}`, 'collector.bad': (e) => `コレクタ: ${e}`, 'no.data': 'まだデータなし',
       'ns.all': 'すべての namespace', 'sort.by': '並び替え', 'sort.name': '名前', 'spark.title': 'ウィンドウ内の推移。網掛け = データなし',
+      'pod.filter': (p) => `Pod ${p}`, containers: 'コンテナ', 'no.containers': 'この Pod のコンテナ別データはまだありません',
     },
   };
   const t = (key, ...args) => {
@@ -235,27 +237,48 @@
   function renderPods(v) {
     const rows = arrange('pods', v.pods, (p) => p.key.namespace);
     if (!rows.length) { main.innerHTML = `<p class="muted">${t('no.pods')}</p>`; return; }
-    main.innerHTML = rows.map((p) => `
-      <div class="card ${p.deleted ? 'deleted' : ''}">
-        <div class="head"><span class="name">${esc(p.key.name)}${p.deleted ? `<span class="badge">${t('gone')}</span>` : ''}${p.phase && p.phase !== 'Running' ? `<span class="badge">${esc(p.phase)}</span>` : ''}</span>
+    main.innerHTML = rows.map((p) => podCard(p, true)).join('');
+    const back = { level: 'pods', filter: state.filter };
+    main.querySelectorAll('[data-pod]').forEach((el) => el.addEventListener('click', () => go('pod', { pod: el.dataset.pod, back })));
+  }
+
+  function podCard(p, tap) {
+    const n = (p.containers || []).length;
+    return `
+      <div class="card ${p.deleted ? 'deleted' : ''} ${tap ? 'tap' : ''}"${tap ? ` data-pod="${esc(p.key.namespace)}/${esc(p.key.name)}"` : ''}>
+        <div class="head"><span class="name">${esc(p.key.name)}${p.deleted ? `<span class="badge">${t('gone')}</span>` : ''}${p.phase && p.phase !== 'Running' ? `<span class="badge">${esc(p.phase)}</span>` : ''}${n > 1 ? `<span class="badge">×${n}</span>` : ''}</span>
           <span class="sub">${esc(p.key.namespace)} · ${esc(p.node || '—')}</span></div>
         ${bars(p.usage, { req: p.requests, lim: p.limits }, p.spark)}
+      </div>`;
+  }
+
+  // one pod and its containers, each against its own requests and limits
+  function renderPod(v) {
+    const cs = v.containers.map((c) => `
+      <div class="card">
+        <div class="head"><span class="name">${esc(c.name)}</span>
+          <span class="sub">${t('req')} ${cpu(c.requests.cpu)} / ${mem(c.requests.memory)}</span></div>
+        ${bars(c.usage, { req: c.requests, lim: c.limits }, c.spark)}
       </div>`).join('');
+    main.innerHTML = podCard(v.pod, false) +
+      `<h2 class="section">${t('containers')}</h2>` + (cs || `<p class="muted">${t('no.containers')}</p>`);
   }
 
   // ---------- navigation ----------
   function go(level, filter) {
     state.level = level;
     state.filter = filter || null;
-    document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.level === level));
-    $('#tools').hidden = level === 'cluster';
+    const tab = level === 'pod' ? 'pods' : level;
+    document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.level === tab));
+    $('#tools').hidden = level === 'cluster' || level === 'pod';
     // nodes are not namespaced, and a workload's pods share its namespace
     $('#ns').hidden = level === 'nodes' || !!(filter && filter.workload);
     if (filter) {
-      const label = filter.node ? t('node.filter', filter.node) : t('workload.filter', filter.workload);
+      const label = filter.pod ? t('pod.filter', filter.pod) : filter.node ? t('node.filter', filter.node) : t('workload.filter', filter.workload);
       crumb.innerHTML = `<button id="back">${t('back')}</button><span>${esc(label)}</span>`;
       crumb.hidden = false;
-      $('#back').addEventListener('click', () => go(filter.node ? 'nodes' : 'workloads'));
+      // a pod goes back to the list it was opened from, with its filter
+      $('#back').addEventListener('click', () => (filter.pod ? go(filter.back.level, filter.back.filter) : go(filter.node ? 'nodes' : 'workloads')));
     } else {
       crumb.hidden = true;
     }
@@ -264,13 +287,15 @@
 
   async function refresh() {
     const q = new URLSearchParams({ window: state.window });
-    if (state.filter) Object.entries(state.filter).forEach(([k, v]) => q.set(k, v));
+    let path = state.level;
+    if (state.level === 'pod') path = 'pods/' + state.filter.pod.split('/').map(encodeURIComponent).join('/');
+    else if (state.filter) Object.entries(state.filter).forEach(([k, v]) => q.set(k, v));
     try {
-      const [res, st] = await Promise.all([fetch(`api/v1/${state.level}?${q}`), fetch('api/v1/status')]);
+      const [res, st] = await Promise.all([fetch(`api/v1/${path}?${q}`), fetch('api/v1/status')]);
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json();
       state.win = data.window;
-      ({ cluster: renderCluster, nodes: renderNodes, workloads: renderWorkloads, pods: renderPods })[state.level](data);
+      ({ cluster: renderCluster, nodes: renderNodes, workloads: renderWorkloads, pods: renderPods, pod: renderPod })[state.level](data);
       if (st.ok) {
         const s = await st.json();
         const dot = $('#status');

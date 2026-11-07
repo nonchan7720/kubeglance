@@ -23,7 +23,8 @@ func newServer(t *testing.T) (*httptest.Server, *services.Collector) {
 	store := domain.NewStore(15*time.Second, time.Hour)
 	key := domain.PodKey{Namespace: "app", Name: "web-1"}
 	store.UpsertNodes([]domain.NodeInfo{{Name: "n1", Ready: true, Allocatable: domain.Resource{CPU: 4000, Memory: 1 << 30}}})
-	store.UpsertPods([]domain.PodInfo{{Key: key, Node: "n1", Workload: domain.WorkloadKey{Namespace: "app", Kind: "Deployment", Name: "web"}}})
+	store.UpsertPods([]domain.PodInfo{{Key: key, Node: "n1", Workload: domain.WorkloadKey{Namespace: "app", Kind: "Deployment", Name: "web"},
+		Containers: []domain.ContainerInfo{{Name: "web"}}}})
 	col := services.NewCollector(store, staticSource{domain.Round{
 		At:    time.Now(),
 		Pods:  map[domain.PodKey]domain.Resource{key: {CPU: 100, Memory: 1 << 20}},
@@ -93,6 +94,15 @@ func TestAPIEndpoints(t *testing.T) {
 	}
 	if resp := get(t, srv.URL+"/api/v1/pods?workload=bad", nil); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("bad workload = %d", resp.StatusCode)
+	}
+
+	var pod services.PodDetailView
+	get(t, srv.URL+"/api/v1/pods/app/web-1?window=5m", &pod)
+	if pod.Pod.Key.Name != "web-1" || pod.Pod.Usage.Now.CPU != 100 || pod.Window.Duration != 5*time.Minute || len(pod.Containers) != 1 {
+		t.Errorf("pod detail = %+v", pod)
+	}
+	if resp := get(t, srv.URL+"/api/v1/pods/app/nope", nil); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unknown pod = %d", resp.StatusCode)
 	}
 
 	var st Status

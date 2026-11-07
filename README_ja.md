@@ -66,6 +66,7 @@ UI が表示するものはすべて `/api/v1` 配下の JSON です。各エン
 | `GET /api/v1/nodes` | ノードごと: 使用量統計、allocatable 比、載っている Pod 数と requests。加えてノード間の偏り（spread, stddev） |
 | `GET /api/v1/workloads?namespace=` | コントローラごと: Pod 数、requests、limits、合算した使用量統計、Pod あたり使用量、使用量/requests 比 |
 | `GET /api/v1/pods?namespace=&node=&workload=ns/Kind/name` | Pod ごと: 使用量統計、使用量/limits 比、使用量/requests 比。ウィンドウ内に消えた Pod も含み、フラグ付き |
+| `GET /api/v1/pods/{namespace}/{name}` | 1 つの Pod と、その各コンテナ（spec 順）: コンテナ自身の requests / limits に対する使用量統計。履歴にない Pod は 404 |
 | `GET /api/v1/status` | バージョン、間隔、保持期間、コレクタの健全性 |
 | `GET /healthz`, `GET /readyz` | liveness。readiness は最初のラウンドを収集してから |
 | `GET /internal/snapshot` | 履歴全体（ピアがコピーするもの） |
@@ -83,6 +84,8 @@ UI が表示するものはすべて `/api/v1` 配下の JSON です。各エン
 | 50 | 約 5 MB |
 | 100 | 約 9 MB |
 | 300 | 約 28 MB |
+
+コンテナが 2 つ以上ある Pod は、Pod 画面のコンテナ別内訳のためにコンテナごとの系列を追加で持ちます（コンテナが 1 つの Pod は Pod の系列がそのままコンテナの系列です）。サイドカー 1 つの Pod なら系列は 1 本ではなく 3 本です。
 
 これに Go ランタイム、HTTP サーバー、client-go のキャッシュ（10〜20 MB）が加わります。chart は 64Mi 要求 / 128Mi 上限で、Raspberry Pi の k3s にも収まります。`--retention` を短くすれば減り、ウィンドウ選択は保持期間で頭打ちになります。
 
