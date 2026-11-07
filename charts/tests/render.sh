@@ -38,8 +38,22 @@ out=$(doc NetworkPolicy --set networkPolicy.enabled=true \
 contains "$out" "kubernetes.io/metadata.name: ingress-nginx" "networkPolicy ingressFrom"
 contains "$out" "cidr: 10.0.0.1/32" "networkPolicy apiServer.cidrs"
 
+# auth: off by default; a Secret the user created is mounted, never a value
+hasnt_text() { ! grep -qF -- "$2" <<<"$1" || { echo "FAIL: $3: unexpected '$2'"; fail=1; }; }
+hasnt_text "$(doc Deployment)" "--auth-token-file" "defaults auth"
+out=$(doc Deployment --set auth.existingSecret=kg-auth)
+contains "$out" "--auth-token-file=/etc/kubeglance/auth/token" "auth flag"
+contains "$out" "secretName: kg-auth" "auth secret volume"
+contains "$out" "mountPath: /etc/kubeglance/auth" "auth mount"
+out=$(doc Deployment --set auth.existingSecret=kg-auth --set auth.key=password)
+contains "$out" "key: password" "auth.key"
+# with the snapshot volume too, both are mounted
+out=$(doc Deployment --set auth.existingSecret=kg-auth --set snapshot.enabled=true)
+contains "$out" "mountPath: /data" "auth + snapshot: data mount"
+contains "$out" "mountPath: /etc/kubeglance/auth" "auth + snapshot: auth mount"
+
 # every combination above also lints
-for set in "" "--set replicaCount=1" "--set networkPolicy.enabled=true"; do
+for set in "" "--set replicaCount=1" "--set networkPolicy.enabled=true" "--set auth.existingSecret=kg-auth --set snapshot.enabled=true"; do
   # shellcheck disable=SC2086 # word splitting is the point
   helm lint --quiet "$chart" $set >/dev/null || { echo "FAIL: helm lint $set"; fail=1; }
 done

@@ -70,6 +70,7 @@ mise run run                    # real cluster via your kubeconfig
 - **The bar's scale** is the limit, else allocatable, else `max(2 × request, 1.1 × window max)`: a pod far over its request must not be clipped flat at 100 %. The sparkline uses the same scale.
 - **`[hidden]` is forced to `display: none`** in `style.css` because `.crumb` and `.tools` set `display: flex`, which would otherwise win over the attribute.
 - **`THIRD_PARTY_NOTICES.md` is generated** (`mise run notices`, `scripts/notices.sh`) for linux, darwin and windows together: windows links modules the others do not. It has no versions on purpose, so a Renovate bump fails `notices:check` only when it adds a module or changes a license, which is when a human should look. After adding a dependency, run `mise run notices` and commit the file.
+- **The auth token is a secret**: it comes only from `--auth-token-file`, `Config.LogValue` writes `authToken: set|none`, never the value, and a test checks it. `/healthz`, `/readyz`, the manifest and the icon are open on purpose (`open` in `handler.go`): add a path there only if it shows no cluster data. Peers send the same token (`peer.NewClient`).
 - **`Limits` is zeroed when any container has no limit** (`podInfo`): a pod is only as limited as its least limited container. The UI then shows "% of request" instead.
 
 ## Branch rulesets

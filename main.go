@@ -71,7 +71,7 @@ func run(ctx context.Context, c interfaces.Config, log *slog.Logger) error {
 	// this one before then
 	srv := &http.Server{
 		Addr:              c.Addr,
-		Handler:           handler.New(handler.Deps{Store: store, Query: query, Collector: collector, Version: version.Version, Log: log}),
+		Handler:           handler.New(handler.Deps{Store: store, Query: query, Collector: collector, Version: version.Version, Log: log, AuthToken: c.AuthToken}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	errc := make(chan error, 1)
@@ -87,7 +87,7 @@ func run(ctx context.Context, c interfaces.Config, log *slog.Logger) error {
 		disk = snapshot.NewFile(c.SnapshotPath)
 	}
 	findPeers := func(ctx context.Context) ([]services.PeerSource, error) {
-		peers, err := peer.Discover(ctx, net.DefaultResolver, c.PeerHost, c.PeerPort, c.PodIP)
+		peers, err := peer.Discover(ctx, net.DefaultResolver, c.PeerHost, c.PeerPort, c.PodIP, c.AuthToken)
 		sources := make([]services.PeerSource, 0, len(peers))
 		for _, p := range peers {
 			sources = append(sources, p)

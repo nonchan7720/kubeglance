@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -41,7 +43,7 @@ func clearEnv(t *testing.T) {
 		"KUBEGLANCE_ADDR", "KUBEGLANCE_INTERVAL", "KUBEGLANCE_RETENTION",
 		"KUBEGLANCE_PEER_HOST", "KUBEGLANCE_PEER_PORT", "POD_IP",
 		"KUBEGLANCE_SNAPSHOT", "KUBEGLANCE_SNAPSHOT_EVERY",
-		"KUBEGLANCE_SHUTDOWN_GRACE", "KUBEGLANCE_LOG_LEVEL", "KUBEGLANCE_BOOTSTRAP_TIMEOUT",
+		"KUBEGLANCE_SHUTDOWN_GRACE", "KUBEGLANCE_LOG_LEVEL", "KUBEGLANCE_BOOTSTRAP_TIMEOUT", "KUBEGLANCE_AUTH_TOKEN_FILE",
 	} {
 		t.Setenv(k, "")
 	}
@@ -234,6 +236,7 @@ func TestConfigLogsEveryEffectiveSetting(t *testing.T) {
 		"addr": ":8080", "kubeconfig": "", "interval": "auto", "retention": "6h0m0s",
 		"peerHost": "kg-peers.ns.svc", "peerPort": float64(8080), "podIP": "",
 		"snapshot": "/data/s", "snapshotEvery": "1m0s", "shutdownGrace": "5s", "logLevel": "info", "bootstrapTimeout": "2m0s",
+		"authTokenFile": "", "authToken": "none",
 	}
 	if len(line.Config) != len(want) {
 		t.Errorf("config has %d fields, want %d: %v", len(line.Config), len(want), line.Config)
@@ -256,5 +259,43 @@ func TestConfigLogValueCoversEveryField(t *testing.T) {
 func TestConfigLogsAFixedInterval(t *testing.T) {
 	if got := intervalString(30 * time.Second); got != "30s" {
 		t.Errorf("intervalString(30s) = %q", got)
+	}
+}
+
+func TestAuthTokenFile(t *testing.T) {
+	clearEnv(t)
+	dir := t.TempDir()
+	file := func(name, content string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	// a mounted Secret usually ends with a newline: trimmed
+	c, _, err := execute(t, "--auth-token-file", file("token", "  s3cret-token\n"))
+	if err != nil || c.AuthToken != "s3cret-token" {
+		t.Fatalf("token = %q, %v", c.AuthToken, err)
+	}
+	t.Setenv("KUBEGLANCE_AUTH_TOKEN_FILE", file("env", "from-env"))
+	if c, _, err := execute(t); err != nil || c.AuthToken != "from-env" {
+		t.Errorf("from the environment: %+v, %v", c, err)
+	}
+	t.Setenv("KUBEGLANCE_AUTH_TOKEN_FILE", "")
+
+	// a typo must not start kubeglance without the protection it was asked for
+	if _, _, err := execute(t, "--auth-token-file", filepath.Join(dir, "missing")); err == nil {
+		t.Error("missing file accepted")
+	}
+	if _, _, err := execute(t, "--auth-token-file", file("empty", " \n")); err == nil {
+		t.Error("empty token accepted")
+	}
+
+	// the startup line says a token is set, never what it is
+	var buf bytes.Buffer
+	slog.New(slog.NewJSONHandler(&buf, nil)).Info("starting", "config", *c)
+	if strings.Contains(buf.String(), "s3cret-token") || !strings.Contains(buf.String(), `"authToken":"set"`) {
+		t.Errorf("startup line = %s", buf.String())
 	}
 }

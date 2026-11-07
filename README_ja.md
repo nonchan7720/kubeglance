@@ -40,6 +40,17 @@ Argo CD なら、Application のソースを `oci://ghcr.io/nonchan7720/charts/k
 
 最初のログ行 `starting` には、実際に使われる設定（フラグ・環境変数・既定値を合わせたもの）が `config` オブジェクトとして入ります。
 
+### アクセス
+
+kubeglance はクラスタ内で何が動いているかを見せるので、インターネットに直接出さず、Tailscale・Cloudflare Access・認証付き Ingress 経由でアクセスしてください。それができない場合はトークンを設定します。
+
+```bash
+kubectl -n kubeglance create secret generic kubeglance-auth --from-literal=token="$(openssl rand -hex 24)"
+helm upgrade kubeglance oci://ghcr.io/nonchan7720/charts/kubeglance -n kubeglance --reuse-values --set auth.existingSecret=kubeglance-auth
+```
+
+ブラウザは最初に一度だけユーザー名（何でもよい）とパスワード（トークン）を尋ねます。API クライアントや Prometheus は `Authorization: Bearer <token>` を送れます。`/healthz`・`/readyz`・Web マニフェスト・アイコンは、プローブとホーム画面への追加のために開いたままです。レプリカ同士は履歴コピーのときにトークンを送り合います。トークンはファイル（マウントした Secret）から読み、フラグでは渡せません。起動ログには設定の有無だけが出ます。
+
 linux / darwin / windows（amd64, arm64, armv7）のバイナリは [Releases](https://github.com/nonchan7720/kubeglance/releases) にあります。クラスタ外からは `kubeglance --kubeconfig ~/.kube/config` で動かせます。
 
 ## 設定
@@ -58,6 +69,7 @@ linux / darwin / windows（amd64, arm64, armv7）のバイナリは [Releases](h
 | `--snapshot-every` (`KUBEGLANCE_SNAPSHOT_EVERY`) | `1m` | 書き出し間隔 |
 | `--shutdown-grace` (`KUBEGLANCE_SHUTDOWN_GRACE`) | `5s` | SIGTERM 後もこの時間は応答し、新レプリカのコピー完了を待つ |
 | `--bootstrap-timeout` (`KUBEGLANCE_BOOTSTRAP_TIMEOUT`) | `2m` | ピアはいるのに 1 つも応答しないとき、起動中のレプリカが履歴コピーを再試行する時間。その間は Ready にならない |
+| `--auth-token-file` (`KUBEGLANCE_AUTH_TOKEN_FILE`) | | UI・API・`/metrics`・ピアコピーに要求するトークンを書いたファイル。空なら無効。[アクセス](#アクセス) を参照 |
 | `--kubeconfig` | | クラスタ外用。未指定なら in-cluster → `$KUBECONFIG` → `~/.kube/config` |
 | `--log-level` (`KUBEGLANCE_LOG_LEVEL`) | `info` | `debug` / `info` / `warn` / `error`（stderr に JSON） |
 

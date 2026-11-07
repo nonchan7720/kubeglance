@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -32,6 +33,10 @@ type Config struct {
 	// BootstrapTimeout is how long a starting replica keeps trying to copy
 	// the history from a peer before it starts without it.
 	BootstrapTimeout time.Duration
+	// AuthTokenFile holds the token required on the UI and API (a mounted
+	// Secret); AuthToken is what it contains, read at start. Never logged.
+	AuthTokenFile string
+	AuthToken     string
 }
 
 // LogValue makes the effective configuration (flags, environment and
@@ -53,7 +58,17 @@ func (c Config) LogValue() slog.Value {
 		slog.String("shutdownGrace", c.ShutdownGrace.String()),
 		slog.String("logLevel", c.LogLevel),
 		slog.String("bootstrapTimeout", c.BootstrapTimeout.String()),
+		slog.String("authTokenFile", c.AuthTokenFile),
+		slog.String("authToken", secretState(c.AuthToken)), // never the value
 	)
+}
+
+// secretState says whether a secret is set without saying what it is.
+func secretState(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return "set"
 }
 
 // intervalString is "auto" for 0 (follow metrics-server), else the duration.
@@ -92,7 +107,10 @@ a flag on the command line wins over the variable.`,
 			// the command line parsed; from here on an error is not a
 			// usage mistake, so do not bury it under the usage text
 			cmd.SilenceUsage = true
-			return applyEnv(cmd.Flags())
+			if err := applyEnv(cmd.Flags()); err != nil {
+				return err
+			}
+			return readToken(&c)
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			log, err := newLogger(c.LogLevel)
@@ -117,9 +135,10 @@ a flag on the command line wins over the variable.`,
 	f.DurationVar(&c.SnapshotEvery, "snapshot-every", time.Minute, "how often to write the snapshot")
 	f.DurationVar(&c.ShutdownGrace, "shutdown-grace", 5*time.Second, "time to keep serving peers after SIGTERM so a new replica can copy the history")
 	f.StringVar(&c.LogLevel, "log-level", "info", "debug | info | warn | error")
+	f.StringVar(&c.AuthTokenFile, "auth-token-file", "", "file with a token required on the UI, the API and /metrics (Basic auth password or Bearer token); empty disables. A file, not a flag value, so it is not in the process list")
 	f.DurationVar(&c.BootstrapTimeout, "bootstrap-timeout", 2*time.Minute, "how long a starting replica retries copying the history from a peer before it starts without it (it is not Ready meanwhile)")
 
-	for flag, key := range map[string]string{
+	for flag, key := range map[string]string{ //nolint:gosec // G101: environment variable names, not credentials
 		"addr":              "KUBEGLANCE_ADDR",
 		"interval":          "KUBEGLANCE_INTERVAL",
 		"retention":         "KUBEGLANCE_RETENTION",
@@ -131,6 +150,7 @@ a flag on the command line wins over the variable.`,
 		"shutdown-grace":    "KUBEGLANCE_SHUTDOWN_GRACE",
 		"log-level":         "KUBEGLANCE_LOG_LEVEL",
 		"bootstrap-timeout": "KUBEGLANCE_BOOTSTRAP_TIMEOUT",
+		"auth-token-file":   "KUBEGLANCE_AUTH_TOKEN_FILE",
 	} {
 		bindEnv(f, flag, key)
 	}
@@ -165,6 +185,24 @@ func applyEnv(f *pflag.FlagSet) error {
 		}
 	})
 	return err
+}
+
+// readToken loads the token from --auth-token-file. A missing or empty file
+// is an error: starting unprotected after asking for protection is worse
+// than not starting.
+func readToken(c *Config) error {
+	if c.AuthTokenFile == "" {
+		return nil
+	}
+	b, err := os.ReadFile(c.AuthTokenFile)
+	if err != nil {
+		return fmt.Errorf("--auth-token-file: %w", err)
+	}
+	c.AuthToken = strings.TrimSpace(string(b))
+	if c.AuthToken == "" {
+		return fmt.Errorf("--auth-token-file: %s is empty", c.AuthTokenFile)
+	}
+	return nil
 }
 
 func newLogger(level string) (*slog.Logger, error) {
