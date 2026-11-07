@@ -53,7 +53,7 @@ func TestRootDefaults(t *testing.T) {
 	}
 	want := Config{
 		Addr:             ":8080",
-		Interval:         15 * time.Second,
+		Interval:         0, // auto: follow metrics-server's resolution
 		Retention:        24 * time.Hour,
 		PeerPort:         8080,
 		SnapshotEvery:    time.Minute,

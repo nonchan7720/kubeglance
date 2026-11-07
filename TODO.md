@@ -38,6 +38,8 @@ Ordered by what unblocks the most. Tick items in the PR that does them; keep thi
 - [ ] NetworkPolicy template (ingress from Ingress controller only; egress to apiserver + DNS).
 - [ ] Structured startup log line that prints the effective config.
 
+- [x] Poll interval follows metrics-server's `--metric-resolution` (detected from the reported `window` at start), so managed clusters with another resolution are polled at theirs. A change of the resolution while kubeglance runs is picked up only on restart.
+
 ## 4. Toward the CNCF Landscape
 
 Entry criteria (checked 2026-11): ~300 GitHub stars, fits an existing category (*Observability and Analysis → Monitoring*), SVG logo, active commits (removed after 3 months idle). The PR goes to `cncf/landscape` (`landscape.yml` + `hosted_logos/kubeglance.svg`).

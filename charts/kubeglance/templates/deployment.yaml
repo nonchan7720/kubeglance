@@ -37,7 +37,9 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - --addr=:8080
-            - --interval={{ .Values.interval }}
+            {{- with .Values.interval }}
+            - --interval={{ . }}
+            {{- end }}
             - --retention={{ .Values.retention }}
             - --log-level={{ .Values.logLevel }}
             - --peer-host={{ include "kubeglance.fullname" . }}-peers.{{ .Release.Namespace }}.svc

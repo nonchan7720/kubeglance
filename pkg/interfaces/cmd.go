@@ -48,7 +48,7 @@ func NewRootCommand(run RunFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "kubeglance",
 		Short: "See what is eating your cluster, from your phone",
-		Long: `kubeglance polls metrics-server every 15 s, keeps a bounded in-memory
+		Long: `kubeglance polls metrics-server at its own resolution, keeps a bounded in-memory
 history, and serves a mobile-first UI and a JSON API with cluster / node /
 workload / pod usage as now, average, median and p95 over a window.
 
@@ -78,7 +78,7 @@ a flag on the command line wins over the variable.`,
 	f.SortFlags = false
 	f.StringVar(&c.Addr, "addr", ":8080", "listen address")
 	f.StringVar(&c.Kubeconfig, "kubeconfig", "", "kubeconfig path (default: in-cluster, then $KUBECONFIG, then ~/.kube/config)")
-	f.DurationVar(&c.Interval, "interval", 15*time.Second, "poll interval; metrics-server refreshes every 15s, shorter is pointless")
+	f.DurationVar(&c.Interval, "interval", 0, "poll interval; 0 follows metrics-server's --metric-resolution, detected at start (15s when it cannot be)")
 	f.DurationVar(&c.Retention, "retention", 24*time.Hour, "how much history to keep in memory")
 	f.StringVar(&c.PeerHost, "peer-host", "", "headless Service name of the replicas; empty disables peer bootstrap")
 	f.IntVar(&c.PeerPort, "peer-port", 8080, "port peers serve on")

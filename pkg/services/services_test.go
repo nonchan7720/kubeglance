@@ -362,3 +362,34 @@ func TestBootstrapStopsOnCancel(t *testing.T) {
 		t.Errorf("did not stop on cancel: %v", time.Since(start))
 	}
 }
+
+func TestResolveInterval(t *testing.T) {
+	detect := func(d time.Duration, err error, calls *int) func(context.Context) (time.Duration, error) {
+		return func(context.Context) (time.Duration, error) { *calls++; return d, err }
+	}
+	pol := IntervalPolicy{Timeout: 50 * time.Millisecond, Retry: 5 * time.Millisecond, Fallback: 15 * time.Second}
+	ctx := context.Background()
+	var calls int
+
+	calls = 0
+	if got := ResolveInterval(ctx, 30*time.Second, detect(10*time.Second, nil, &calls), pol, nil); got != 30*time.Second || calls != 0 {
+		t.Errorf("configured: %v after %d detections, want 30s without detecting", got, calls)
+	}
+	calls = 0
+	if got := ResolveInterval(ctx, 0, detect(10*time.Second, nil, &calls), pol, nil); got != 10*time.Second || calls != 1 {
+		t.Errorf("detected: %v after %d detections, want 10s after 1", got, calls)
+	}
+	// metrics-server answers only after it scraped twice: retried, then fallback
+	calls = 0
+	if got := ResolveInterval(ctx, 0, detect(0, errors.New("no metrics yet"), &calls), pol, nil); got != 15*time.Second || calls < 2 {
+		t.Errorf("undetectable: %v after %d detections, want the 15s fallback after retries", got, calls)
+	}
+	// metrics-server refuses a resolution below 10 s; anything outside
+	// [10s, 5m] is not its resolution, so it is not trusted
+	for _, bogus := range []time.Duration{3 * time.Second, 20 * time.Minute} {
+		calls = 0
+		if got := ResolveInterval(ctx, 0, detect(bogus, nil, &calls), pol, nil); got != 15*time.Second {
+			t.Errorf("detected %v: got %v, want the fallback", bogus, got)
+		}
+	}
+}

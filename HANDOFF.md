@@ -15,7 +15,7 @@ The design was settled in conversation with the owner, and these decisions are *
 | History in a process-local ring buffer, no external DB | owner approved the memory estimate (~10 MB / 100 pods / 24 h) |
 | Zero-downtime update without clustering: `replicas: 2` + peer snapshot copy on start + preStop/shutdown grace | metrics-server is a shared source of truth, so replicas need no consensus |
 | On-disk snapshot is an *optional safety net*, not the mechanism | k3s local-path storage is RWO + node-bound, so it cannot make rolling updates lossless |
-| metrics-server polled at 15 s, never faster; owner mapping via informers | matches metrics-server's resolution; no load on kubelets |
+| metrics-server polled at its own resolution, never faster (detected at start from the reported `window`; 15 s on k3s; `--interval` overrides); owner mapping via informers | every new value read once, none twice; managed clusters set their own resolution (metrics-server allows ≥ 10 s); no load on kubelets |
 | Go, layered `pkg/{domain,services,infrastructure,interfaces}`, mise, golangci-lint 2.15, release-please, goreleaser, renovate | the owner's house style (same as nonchan7720/depgraph) |
 | Quality enforced by claude-hook-gate (`.claude/gate.yaml`) and depgraph (`.depgraph.yml`) | the owner's own tools; keep them green |
 

@@ -45,7 +45,7 @@ linux / darwin / windows（amd64, arm64, armv7）のバイナリは [Releases](h
 | フラグ | 既定値 | 意味 |
 |---|---|---|
 | `--addr` (`KUBEGLANCE_ADDR`) | `:8080` | 待ち受けアドレス |
-| `--interval` (`KUBEGLANCE_INTERVAL`) | `15s` | ポーリング間隔。metrics-server の更新は15秒なので、短くしても同じ値を2回読むだけ |
+| `--interval` (`KUBEGLANCE_INTERVAL`) | 自動 | ポーリング間隔。既定では metrics-server の `--metric-resolution` に合わせる。起動時に metrics-server が返す `window` から検出（k3s は 15 秒。マネージドでは別の値のこともある。検出できなければ 15 秒）。それより短くしても同じ値を 2 回読むだけなので、上書きしたいときだけ指定する |
 | `--retention` (`KUBEGLANCE_RETENTION`) | `24h` | メモリに保持する履歴。ウィンドウの上限 |
 | `--peer-host` (`KUBEGLANCE_PEER_HOST`) | | レプリカの headless Service。空ならピアコピー無効 |
 | `--peer-port` (`KUBEGLANCE_PEER_PORT`) | `8080` | ピアのポート |
