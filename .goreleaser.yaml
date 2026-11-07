@@ -23,7 +23,7 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
-    files: [LICENSE, NOTICE, README.md]
+    files: [LICENSE, NOTICE, THIRD_PARTY_NOTICES.md, README.md]
 
 checksum:
   name_template: checksums.txt
@@ -33,6 +33,7 @@ dockers:
     use: buildx
     goarch: amd64
     dockerfile: Dockerfile
+    extra_files: [LICENSE, NOTICE, THIRD_PARTY_NOTICES.md]
     build_flag_templates: &labels
       - --platform=linux/amd64
       - --label=org.opencontainers.image.title=kubeglance
@@ -43,6 +44,7 @@ dockers:
     use: buildx
     goarch: arm64
     dockerfile: Dockerfile
+    extra_files: [LICENSE, NOTICE, THIRD_PARTY_NOTICES.md]
     build_flag_templates:
       - --platform=linux/arm64
       - --label=org.opencontainers.image.title=kubeglance
@@ -54,6 +56,7 @@ dockers:
     goarch: arm
     goarm: "7"
     dockerfile: Dockerfile
+    extra_files: [LICENSE, NOTICE, THIRD_PARTY_NOTICES.md]
     build_flag_templates:
       - --platform=linux/arm/v7
       - --label=org.opencontainers.image.title=kubeglance

@@ -28,6 +28,8 @@ jobs:
         run: mise run test
       - name: Build
         run: mise run build
+      - name: Third-party notices are current, no forbidden licenses
+        run: mise run notices:check
       - name: no CDN in the UI
         run: |
           ! grep -rEn 'https?://' pkg/interfaces/handler/ui/static/ --include='*.html' --include='*.js' --include='*.css' | grep -vE 'w3.org|xmlns'

@@ -29,7 +29,10 @@ rules:
 
   # module / toolchain changes
   - match: ["go.mod", "go.sum", "mise.toml"]
-    run: [{ name: mod, cmd: "go mod tidy -diff", files: false, timeout: 60 }]
+    run:
+      - { name: mod, cmd: "go mod tidy -diff", files: false, timeout: 60 }
+      # a new or bumped dependency must be in THIRD_PARTY_NOTICES.md
+      - { name: notices, cmd: "command -v go-licenses >/dev/null || exit 0; bash scripts/notices.sh | diff -q THIRD_PARTY_NOTICES.md - >/dev/null || { echo 'THIRD_PARTY_NOTICES.md is stale: mise run notices'; exit 1; }", files: false, timeout: 300 }
     run_checks: [go-all]
 
   # Helm chart: lint + render on every template / values change
