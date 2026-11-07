@@ -1,4 +1,4 @@
-package main
+package interfaces
 
 import (
 	"bytes"
@@ -13,10 +13,10 @@ import (
 
 // execute runs the root command with args and returns the config the run
 // function received (nil when it was not called) and what was printed.
-func execute(t *testing.T, args ...string) (*config, string, error) {
+func execute(t *testing.T, args ...string) (*Config, string, error) {
 	t.Helper()
-	var got *config
-	cmd := newRootCommand(func(_ context.Context, c config, log *slog.Logger) error {
+	var got *Config
+	cmd := NewRootCommand(func(_ context.Context, c Config, log *slog.Logger) error {
 		if log == nil {
 			t.Fatal("run called without a logger")
 		}
@@ -51,14 +51,14 @@ func TestRootDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := config{
-		addr:          ":8080",
-		interval:      15 * time.Second,
-		retention:     24 * time.Hour,
-		peerPort:      8080,
-		snapshotEvery: time.Minute,
-		shutdownGrace: 5 * time.Second,
-		logLevel:      "info",
+	want := Config{
+		Addr:          ":8080",
+		Interval:      15 * time.Second,
+		Retention:     24 * time.Hour,
+		PeerPort:      8080,
+		SnapshotEvery: time.Minute,
+		ShutdownGrace: 5 * time.Second,
+		LogLevel:      "info",
 	}
 	if c == nil || *c != want {
 		t.Fatalf("config = %+v, want %+v", c, want)
@@ -76,18 +76,18 @@ func TestRootFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := config{
-		addr:          "127.0.0.1:9090",
-		kubeconfig:    "/tmp/kc",
-		interval:      30 * time.Second,
-		retention:     2 * time.Hour,
-		peerHost:      "peers.ns.svc",
-		peerPort:      9091,
-		podIP:         "10.0.0.7",
-		snapshotPath:  "/data/s.snap",
-		snapshotEvery: 5 * time.Minute,
-		shutdownGrace: 7 * time.Second,
-		logLevel:      "debug",
+	want := Config{
+		Addr:          "127.0.0.1:9090",
+		Kubeconfig:    "/tmp/kc",
+		Interval:      30 * time.Second,
+		Retention:     2 * time.Hour,
+		PeerHost:      "peers.ns.svc",
+		PeerPort:      9091,
+		PodIP:         "10.0.0.7",
+		SnapshotPath:  "/data/s.snap",
+		SnapshotEvery: 5 * time.Minute,
+		ShutdownGrace: 7 * time.Second,
+		LogLevel:      "debug",
 	}
 	if c == nil || *c != want {
 		t.Fatalf("config = %+v, want %+v", c, want)
@@ -110,17 +110,17 @@ func TestRootEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := config{
-		addr:          ":9000",
-		interval:      30 * time.Second,
-		retention:     6 * time.Hour,
-		peerHost:      "peers",
-		peerPort:      9001,
-		podIP:         "10.1.2.3",
-		snapshotPath:  "/s",
-		snapshotEvery: 2 * time.Minute,
-		shutdownGrace: 9 * time.Second,
-		logLevel:      "warn",
+	want := Config{
+		Addr:          ":9000",
+		Interval:      30 * time.Second,
+		Retention:     6 * time.Hour,
+		PeerHost:      "peers",
+		PeerPort:      9001,
+		PodIP:         "10.1.2.3",
+		SnapshotPath:  "/s",
+		SnapshotEvery: 2 * time.Minute,
+		ShutdownGrace: 9 * time.Second,
+		LogLevel:      "warn",
 	}
 	if c == nil || *c != want {
 		t.Fatalf("config = %+v, want %+v", c, want)
@@ -134,8 +134,8 @@ func TestRootFlagBeatsEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.interval != 45*time.Second {
-		t.Fatalf("interval = %v, want 45s", c.interval)
+	if c.Interval != 45*time.Second {
+		t.Fatalf("interval = %v, want 45s", c.Interval)
 	}
 }
 

@@ -1,4 +1,6 @@
-package main
+// Package interfaces holds what kubeglance exposes: the command line here,
+// the HTTP API and UI in handler.
+package interfaces
 
 import (
 	"context"
@@ -13,28 +15,33 @@ import (
 	"github.com/nonchan7720/kubeglance/pkg/version"
 )
 
-type config struct {
-	addr          string
-	kubeconfig    string
-	interval      time.Duration
-	retention     time.Duration
-	peerHost      string
-	peerPort      int
-	podIP         string
-	snapshotPath  string
-	snapshotEvery time.Duration
-	shutdownGrace time.Duration
-	logLevel      string
+// Config is what the command line and environment configure; main wires
+// it into the services.
+type Config struct {
+	Addr          string
+	Kubeconfig    string
+	Interval      time.Duration
+	Retention     time.Duration
+	PeerHost      string
+	PeerPort      int
+	PodIP         string
+	SnapshotPath  string
+	SnapshotEvery time.Duration
+	ShutdownGrace time.Duration
+	LogLevel      string
 }
 
-// runFunc starts kubeglance with a parsed config; tests replace it.
-type runFunc func(ctx context.Context, c config, log *slog.Logger) error
+// RunFunc starts kubeglance with a parsed Config. It lives in main, which
+// is the only place allowed to wire infrastructure into services.
+type RunFunc func(ctx context.Context, c Config, log *slog.Logger) error
 
 // envAnnotation marks a flag that falls back to an environment variable.
 const envAnnotation = "kubeglance/env"
 
-func newRootCommand(run runFunc) *cobra.Command {
-	var c config
+// NewRootCommand returns the kubeglance command; run is called once the
+// flags and environment are parsed and validated.
+func NewRootCommand(run RunFunc) *cobra.Command {
+	var c Config
 	cmd := &cobra.Command{
 		Use:   "kubeglance",
 		Short: "See what is eating your cluster, from your phone",
@@ -55,7 +62,7 @@ a flag on the command line wins over the variable.`,
 			return applyEnv(cmd.Flags())
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			log, err := newLogger(c.logLevel)
+			log, err := newLogger(c.LogLevel)
 			if err != nil {
 				return err
 			}
@@ -66,17 +73,17 @@ a flag on the command line wins over the variable.`,
 
 	f := cmd.Flags()
 	f.SortFlags = false
-	f.StringVar(&c.addr, "addr", ":8080", "listen address")
-	f.StringVar(&c.kubeconfig, "kubeconfig", "", "kubeconfig path (default: in-cluster, then $KUBECONFIG, then ~/.kube/config)")
-	f.DurationVar(&c.interval, "interval", 15*time.Second, "poll interval; metrics-server refreshes every 15s, shorter is pointless")
-	f.DurationVar(&c.retention, "retention", 24*time.Hour, "how much history to keep in memory")
-	f.StringVar(&c.peerHost, "peer-host", "", "headless Service name of the replicas; empty disables peer bootstrap")
-	f.IntVar(&c.peerPort, "peer-port", 8080, "port peers serve on")
-	f.StringVar(&c.podIP, "pod-ip", "", "this pod's IP, excluded from peers (downward API)")
-	f.StringVar(&c.snapshotPath, "snapshot", "", "optional file to persist history to (gzip JSON); empty disables")
-	f.DurationVar(&c.snapshotEvery, "snapshot-every", time.Minute, "how often to write the snapshot")
-	f.DurationVar(&c.shutdownGrace, "shutdown-grace", 5*time.Second, "time to keep serving peers after SIGTERM so a new replica can copy the history")
-	f.StringVar(&c.logLevel, "log-level", "info", "debug | info | warn | error")
+	f.StringVar(&c.Addr, "addr", ":8080", "listen address")
+	f.StringVar(&c.Kubeconfig, "kubeconfig", "", "kubeconfig path (default: in-cluster, then $KUBECONFIG, then ~/.kube/config)")
+	f.DurationVar(&c.Interval, "interval", 15*time.Second, "poll interval; metrics-server refreshes every 15s, shorter is pointless")
+	f.DurationVar(&c.Retention, "retention", 24*time.Hour, "how much history to keep in memory")
+	f.StringVar(&c.PeerHost, "peer-host", "", "headless Service name of the replicas; empty disables peer bootstrap")
+	f.IntVar(&c.PeerPort, "peer-port", 8080, "port peers serve on")
+	f.StringVar(&c.PodIP, "pod-ip", "", "this pod's IP, excluded from peers (downward API)")
+	f.StringVar(&c.SnapshotPath, "snapshot", "", "optional file to persist history to (gzip JSON); empty disables")
+	f.DurationVar(&c.SnapshotEvery, "snapshot-every", time.Minute, "how often to write the snapshot")
+	f.DurationVar(&c.ShutdownGrace, "shutdown-grace", 5*time.Second, "time to keep serving peers after SIGTERM so a new replica can copy the history")
+	f.StringVar(&c.LogLevel, "log-level", "info", "debug | info | warn | error")
 
 	for flag, key := range map[string]string{
 		"addr":           "KUBEGLANCE_ADDR",

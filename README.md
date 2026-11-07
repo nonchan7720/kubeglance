@@ -102,7 +102,7 @@ main.go              wires everything
 pkg/domain           samples, the ring-buffer Series, Stats (avg / median / p95 / coverage), Store, aggregation. No Kubernetes.
 pkg/services         Collector (poll → store), Query (the four views), Bootstrap (peers, disk), Persister
 pkg/infrastructure   k8s (metrics.k8s.io poll, informers for pod → owner, node), peer (HTTP), snapshot (file)
-pkg/interfaces       HTTP API and the embedded UI (plain HTML / CSS / JS, no build, no CDN)
+pkg/interfaces       the command line (cobra: flags, env) and the HTTP API with the embedded UI (plain HTML / CSS / JS, no build, no CDN)
 charts/kubeglance    Helm chart
 internal/devserver   `mise run dev`: the UI with synthetic data, no cluster needed
 ```

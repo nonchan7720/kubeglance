@@ -102,7 +102,7 @@ main.go              全体の配線
 pkg/domain           サンプル、リングバッファ Series、Stats（avg / median / p95 / coverage）、Store、集約。Kubernetes 非依存
 pkg/services         Collector（ポーリング → store）、Query（4つのビュー）、Bootstrap（ピア、ディスク）、Persister
 pkg/infrastructure   k8s（metrics.k8s.io ポーリング、Pod → owner のインフォーマー、ノード）、peer（HTTP）、snapshot（ファイル）
-pkg/interfaces       HTTP API と埋め込み UI（素の HTML / CSS / JS。ビルドなし、CDN なし）
+pkg/interfaces       コマンドライン（cobra: フラグ、環境変数）と HTTP API・埋め込み UI（素の HTML / CSS / JS。ビルドなし、CDN なし）
 charts/kubeglance    Helm chart
 internal/devserver   `mise run dev`: クラスタなしで合成データの UI を表示
 ```

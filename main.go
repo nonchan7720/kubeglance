@@ -22,6 +22,7 @@ import (
 	"github.com/nonchan7720/kubeglance/pkg/infrastructure/k8s"
 	"github.com/nonchan7720/kubeglance/pkg/infrastructure/peer"
 	"github.com/nonchan7720/kubeglance/pkg/infrastructure/snapshot"
+	"github.com/nonchan7720/kubeglance/pkg/interfaces"
 	"github.com/nonchan7720/kubeglance/pkg/interfaces/handler"
 	"github.com/nonchan7720/kubeglance/pkg/services"
 	"github.com/nonchan7720/kubeglance/pkg/version"
@@ -29,7 +30,7 @@ import (
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	err := newRootCommand(run).ExecuteContext(ctx)
+	err := interfaces.NewRootCommand(run).ExecuteContext(ctx)
 	stop()
 	if err != nil {
 		slog.New(slog.NewJSONHandler(os.Stderr, nil)).Error("kubeglance exited", "err", err)
@@ -37,13 +38,13 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, c config, log *slog.Logger) error {
-	log.Info("starting", "version", version.Version, "interval", c.interval, "retention", c.retention)
+func run(ctx context.Context, c interfaces.Config, log *slog.Logger) error {
+	log.Info("starting", "version", version.Version, "interval", c.Interval, "retention", c.Retention)
 
-	store := domain.NewStore(c.interval, c.retention)
+	store := domain.NewStore(c.Interval, c.Retention)
 	log.Info("history sized", "samplesPerEntity", store.Capacity())
 
-	clients, err := k8s.NewClients(c.kubeconfig)
+	clients, err := k8s.NewClients(c.Kubeconfig)
 	if err != nil {
 		return err
 	}
@@ -55,7 +56,7 @@ func run(ctx context.Context, c config, log *slog.Logger) error {
 	query := services.NewQuery(store)
 
 	// 1. bootstrap history from peers, then disk
-	peers, err := peer.Discover(ctx, net.DefaultResolver, c.peerHost, c.peerPort, c.podIP)
+	peers, err := peer.Discover(ctx, net.DefaultResolver, c.PeerHost, c.PeerPort, c.PodIP)
 	if err != nil {
 		log.Warn("peer discovery failed; starting without peer history", "err", err)
 	}
@@ -64,8 +65,8 @@ func run(ctx context.Context, c config, log *slog.Logger) error {
 		sources = append(sources, p)
 	}
 	var disk services.SnapshotStore
-	if c.snapshotPath != "" {
-		disk = snapshot.NewFile(c.snapshotPath)
+	if c.SnapshotPath != "" {
+		disk = snapshot.NewFile(c.SnapshotPath)
 	}
 	services.Bootstrap(ctx, store, sources, disk, log)
 
@@ -74,17 +75,17 @@ func run(ctx context.Context, c config, log *slog.Logger) error {
 		return err
 	}
 	go collector.Run(ctx)
-	go services.NewPersister(store, disk, c.snapshotEvery, log).Run(ctx)
+	go services.NewPersister(store, disk, c.SnapshotEvery, log).Run(ctx)
 
 	// 3. serve
 	srv := &http.Server{
-		Addr:              c.addr,
+		Addr:              c.Addr,
 		Handler:           handler.New(handler.Deps{Store: store, Query: query, Collector: collector, Version: version.Version, Log: log}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	errc := make(chan error, 1)
 	go func() {
-		log.Info("listening", "addr", c.addr)
+		log.Info("listening", "addr", c.Addr)
 		errc <- srv.ListenAndServe()
 	}()
 
@@ -96,8 +97,8 @@ func run(ctx context.Context, c config, log *slog.Logger) error {
 	// On SIGTERM, keep serving for the grace period: the replacing replica
 	// may be copying the history right now, and the preStop hook plus this
 	// delay is what makes the hand-over lossless.
-	log.Info("shutting down", "grace", c.shutdownGrace)
-	time.Sleep(c.shutdownGrace)
+	log.Info("shutting down", "grace", c.ShutdownGrace)
+	time.Sleep(c.ShutdownGrace)
 	sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(sctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
