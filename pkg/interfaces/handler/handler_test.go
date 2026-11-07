@@ -239,15 +239,15 @@ func TestMetricsEndpoint(t *testing.T) {
 	}
 	for k, want := range map[string]string{
 		`kubeglance_build_info{version="test"}`: "1",
-		"kubeglance_poll_rounds_total":           "1",
-		"kubeglance_poll_errors_total":           "0",
-		"kubeglance_poll_interval_seconds":       "15",
-		"kubeglance_store_pods":                  "1",
-		"kubeglance_store_nodes":                 "1",
-		"kubeglance_store_series":                "2",
-		"kubeglance_store_samples":               "2",
-		"kubeglance_store_series_capacity":       "241",
-		"kubeglance_ready":                       "1",
+		"kubeglance_poll_rounds_total":          "1",
+		"kubeglance_poll_errors_total":          "0",
+		"kubeglance_poll_interval_seconds":      "15",
+		"kubeglance_store_pods":                 "1",
+		"kubeglance_store_nodes":                "1",
+		"kubeglance_store_series":               "2",
+		"kubeglance_store_samples":              "2",
+		"kubeglance_store_series_capacity":      "241",
+		"kubeglance_ready":                      "1",
 	} {
 		if values[k] != want {
 			t.Errorf("%s = %q, want %s", k, values[k], want)
