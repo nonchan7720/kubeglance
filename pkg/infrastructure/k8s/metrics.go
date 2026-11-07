@@ -44,19 +44,31 @@ func (m *MetricsSource) Poll(ctx context.Context) (domain.Round, error) {
 
 func convertRound(at time.Time, nodes *metricsv1beta1.NodeMetricsList, pods *metricsv1beta1.PodMetricsList) domain.Round {
 	r := domain.Round{
-		At:    at.Truncate(time.Second),
-		Pods:  make(map[domain.PodKey]domain.Resource, len(pods.Items)),
-		Nodes: make(map[string]domain.Resource, len(nodes.Items)),
+		At:         at.Truncate(time.Second),
+		Pods:       make(map[domain.PodKey]domain.Resource, len(pods.Items)),
+		Nodes:      make(map[string]domain.Resource, len(nodes.Items)),
+		Containers: map[domain.PodKey]map[string]domain.Resource{},
 	}
 	for _, n := range nodes.Items {
 		r.Nodes[n.Name] = toResource(n.Usage)
 	}
 	for _, p := range pods.Items {
+		key := domain.PodKey{Namespace: p.Namespace, Name: p.Name}
 		var sum domain.Resource
-		for _, c := range p.Containers {
-			sum = sum.Add(toResource(c.Usage))
+		var byName map[string]domain.Resource
+		if len(p.Containers) > 1 {
+			// only multi-container pods: a single container's series is the pod's
+			byName = make(map[string]domain.Resource, len(p.Containers))
+			r.Containers[key] = byName
 		}
-		r.Pods[domain.PodKey{Namespace: p.Namespace, Name: p.Name}] = sum
+		for _, c := range p.Containers {
+			u := toResource(c.Usage)
+			sum = sum.Add(u)
+			if byName != nil {
+				byName[c.Name] = u
+			}
+		}
+		r.Pods[key] = sum
 	}
 	return r
 }

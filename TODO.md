@@ -4,6 +4,8 @@ Ordered by what unblocks the most. Tick items in the PR that does them; keep thi
 
 ## 0. Prove it on a real cluster (blocks everything else)
 
+A Claude Code cloud container cannot do this part: `dockerd` starts and the k3s server in Docker comes up, but every pod sandbox fails (`runc create failed: can't get final child's PID from pipe`), so metrics-server never runs. It has to be the owner's k3s (or any machine with a working nested runtime).
+
 - [ ] Run `mise run run` against a k3s cluster with metrics-server; confirm all four views populate and owner resolution is right (Deployment / StatefulSet / DaemonSet / CronJob / static pods / an operator-owned pod).
 - [ ] `helm install` from `charts/kubeglance` with `replicaCount: 2`; confirm `/readyz` flips only after the peer copy + first poll.
 - [ ] Rolling update test: change the image tag, watch `kubectl get pods -w`, then check `GET /api/v1/cluster?window=1h` has `coverage: 1` on the new pod. This is the headline claim of the README; it must be measured, not assumed.
@@ -21,22 +23,22 @@ Ordered by what unblocks the most. Tick items in the PR that does them; keep thi
 
 ## 2. Product gaps the owner will hit first
 
-- [ ] **Sparkline per row**: the numbers exist (`Series`); a tiny inline SVG of the window per bar makes "has it been like this for 30 min" visible at a glance. Keep it dependency-free.
-- [ ] **Namespace filter** in the Workloads / Pods tabs (API already supports `?namespace=`).
-- [ ] **Sort toggle** (CPU / memory / name) on Nodes, Workloads, Pods.
-- [ ] **Container-level breakdown** on the Pod screen (metrics-server returns per-container usage; `convertRound` currently sums it).
+- [x] **Sparkline per row**: the numbers exist (`Series`); a tiny inline SVG of the window per bar makes "has it been like this for 30 min" visible at a glance. Keep it dependency-free.
+- [x] **Namespace filter** in the Workloads / Pods tabs. Done client-side: the API already returns every row, so the namespace list stays complete without another request.
+- [x] **Sort toggle** (CPU / memory / name) on Nodes, Workloads, Pods. Nodes sort by ratio of allocatable, workloads and pods by usage now.
+- [x] **Container-level breakdown** on the Pod screen: tap a pod for its containers (`GET /api/v1/pods/{namespace}/{name}`). Per-container series are kept for multi-container pods only.
 - [ ] **Downsampling for long retention**: raw 15 s for the last hour, 1-min means beyond, so `--retention=7d` stays small. Design note: stats over a downsampled range must be labelled as such (`coverage` already exists; add `resolution`).
-- [ ] **Gap rendering**: `coverage` is shown as a percentage; draw the gap in the sparkline once sparklines exist.
-- [ ] **Light theme polish**: only dark was screenshot-checked.
-- [ ] **i18n**: a test that `DICT.en` and `DICT.ja` have the same keys (a Go test can read the embedded `app.js` and compare), like claude-hook-gate does for its locales.
+- [x] **Gap rendering**: empty sparkline buckets are shaded, never bridged.
+- [x] **Light theme polish**: checked at 375 px in light and dark, en and ja (avg marker colour, ja tab labels, stats row wrapping, `[hidden]` vs `display: flex`).
+- [x] **i18n**: a test that `DICT.en` and `DICT.ja` have the same keys (a Go test can read the embedded `app.js` and compare), like claude-hook-gate does for its locales.
 
 ## 3. Operations
 
 - [ ] Optional **basic auth / bearer token** flag for people who expose it without a tunnel (default off; document that Tailscale / Cloudflare Access is the recommended way).
 - [ ] `/metrics` Prometheus endpoint for kubeglance itself (poll duration, rounds, store size) — small, and expected in the Landscape's Monitoring category.
-- [ ] PodDisruptionBudget (`minAvailable: 1`) in the chart when `replicaCount > 1`.
-- [ ] NetworkPolicy template (ingress from Ingress controller only; egress to apiserver + DNS).
-- [ ] Structured startup log line that prints the effective config.
+- [x] PodDisruptionBudget (`minAvailable: 1`) in the chart when `replicaCount > 1`.
+- [x] NetworkPolicy template (ingress from the replicas + `networkPolicy.ingressFrom`; egress to DNS, the API server and the replicas). Off by default. `charts/tests/render.sh` checks the renders; it has not been applied to a real CNI yet, see §0.
+- [x] Structured startup log line that prints the effective config (`starting` → `config`; a test fails when a `Config` field is not logged).
 
 ## 4. Toward the CNCF Landscape
 

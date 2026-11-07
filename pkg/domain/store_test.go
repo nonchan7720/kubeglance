@@ -204,3 +204,82 @@ func TestMergeOfReplicasPollingAtDifferentOffsetsDoesNotDuplicate(t *testing.T) 
 		t.Errorf("after recording slot +30 again: %d samples", n)
 	}
 }
+
+func TestContainerSeries(t *testing.T) {
+	s := newTestStore()
+	p := PodKey{"app", "web-1"}
+	s.UpsertPods([]PodInfo{{Key: p, Containers: []ContainerInfo{{Name: "app"}, {Name: "proxy"}}}})
+	for i := range 3 {
+		s.Record(Round{
+			At:         at(i * 15),
+			Pods:       map[PodKey]Resource{p: {CPU: int64(10 + i), Memory: 30}},
+			Containers: map[PodKey]map[string]Resource{p: {"app": {CPU: int64(8 + i), Memory: 20}, "proxy": {CPU: 2, Memory: 10}}},
+		})
+	}
+	got := s.ContainerSamples(p, at(15))
+	if len(got) != 2 || len(got["app"]) != 2 || len(got["proxy"]) != 2 {
+		t.Fatalf("containers since 15 s = %v", got)
+	}
+	if got["app"][0].Usage.CPU != 9 || got["app"][1].Usage.CPU != 10 || got["proxy"][1].Usage.Memory != 10 {
+		t.Errorf("app = %v, proxy = %v", got["app"], got["proxy"])
+	}
+	if s.ContainerSamples(PodKey{"app", "other"}, time.Time{}) != nil {
+		t.Error("unknown pod has container samples")
+	}
+
+	// a peer copy carries the container series and merges them by instant
+	b := newTestStore()
+	b.Record(Round{At: at(45), Pods: map[PodKey]Resource{p: {CPU: 13}},
+		Containers: map[PodKey]map[string]Resource{p: {"app": {CPU: 11}, "proxy": {CPU: 2}}}})
+	b.Merge(s.Snapshot())
+	merged := b.ContainerSamples(p, time.Time{})
+	if len(merged["app"]) != 4 || merged["app"][3].Usage.CPU != 11 || len(merged["proxy"]) != 4 {
+		t.Errorf("merged containers = %v", merged)
+	}
+
+	// a snapshot from a replica that predates container series merges too
+	old := s.Snapshot()
+	for i := range old.Pods {
+		old.Pods[i].Containers = nil
+	}
+	c := newTestStore()
+	c.Merge(old)
+	if len(c.PodSamples(p, time.Time{})) != 3 || len(c.ContainerSamples(p, time.Time{})) != 0 {
+		t.Error("snapshot without containers did not merge cleanly")
+	}
+
+	// the container series go with their pod
+	s.RemovePod(p, at(50))
+	s.Prune(at(50).Add(2 * time.Minute))
+	if s.ContainerSamples(p, time.Time{}) != nil {
+		t.Error("container series outlived the pruned pod")
+	}
+}
+
+func TestContainerSeriesAreSlottedToo(t *testing.T) {
+	// replica A at +0/+15, replica B (older version, raw poll times) at
+	// +7/+22, same readings: the container series must dedupe like the pod's
+	p := PodKey{"app", "web"}
+	round := func(sec int, cpu int64) Round {
+		return Round{At: at(sec), Pods: map[PodKey]Resource{p: {CPU: cpu}},
+			Containers: map[PodKey]map[string]Resource{p: {"app": {CPU: cpu - 1}, "proxy": {CPU: 1}}}}
+	}
+	a := newTestStore()
+	a.Record(round(0, 10))
+	a.Record(round(15, 11))
+	b := newTestStore()
+	b.Record(round(7, 10)) // Record slots: +0
+	if got := b.ContainerSamples(p, time.Time{})["app"]; len(got) != 1 || !got[0].At.Equal(at(0)) {
+		t.Fatalf("recorded container sample = %v, want at +0s", got)
+	}
+	old := b.Snapshot()
+	for i := range old.Pods { // as an older replica would send it
+		old.Pods[i].Containers["app"] = []Sample{{At: at(7), Usage: Resource{CPU: 9}}, {At: at(22), Usage: Resource{CPU: 10}}}
+	}
+	dst := newTestStore()
+	dst.Merge(a.Snapshot())
+	dst.Merge(old)
+	if got := dst.ContainerSamples(p, time.Time{})["app"]; len(got) != 2 || !got[0].At.Equal(at(0)) || !got[1].At.Equal(at(15)) {
+		t.Errorf("merged container samples = %v, want one per slot at +0, +15", got)
+	}
+}

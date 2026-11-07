@@ -40,10 +40,18 @@
 </nav>
 
 <div id="crumb" class="crumb" hidden></div>
+<div id="tools" class="tools" hidden>
+  <select id="ns" aria-label="namespace"></select>
+  <div id="sort" class="seg" role="group" data-i18n-label="sort.by">
+    <button data-sort="cpu" aria-pressed="true">CPU</button>
+    <button data-sort="memory" aria-pressed="false">MEM</button>
+    <button data-sort="name" aria-pressed="false" data-i18n="sort.name">A–Z</button>
+  </div>
+</div>
 <main id="main"><p class="muted" data-i18n="loading">loading…</p></main>
 
 <footer>
-  <span data-i18n-html="footer">now · <b>avg</b> · <i>median</i> · p95 over the window</span>
+  <span data-i18n-html="footer">now · <b>avg</b> · <i>median</i> · p95 over the window · <span class="gapkey"></span> no data</span>
 </footer>
 <script src="app.js"></script>
 </body>

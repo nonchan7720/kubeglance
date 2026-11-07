@@ -34,6 +34,28 @@ type Config struct {
 	BootstrapTimeout time.Duration
 }
 
+// LogValue makes the effective configuration (flags, environment and
+// defaults combined) one "config" group on the startup line, so a log shows
+// what a replica actually ran with. Durations are written as Go durations
+// ("15s"), not nanoseconds. Config holds no secrets; keep it that way, or
+// leave the secret out here.
+func (c Config) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("addr", c.Addr),
+		slog.String("kubeconfig", c.Kubeconfig),
+		slog.String("interval", c.Interval.String()),
+		slog.String("retention", c.Retention.String()),
+		slog.String("peerHost", c.PeerHost),
+		slog.Int("peerPort", c.PeerPort),
+		slog.String("podIP", c.PodIP),
+		slog.String("snapshot", c.SnapshotPath),
+		slog.String("snapshotEvery", c.SnapshotEvery.String()),
+		slog.String("shutdownGrace", c.ShutdownGrace.String()),
+		slog.String("logLevel", c.LogLevel),
+		slog.String("bootstrapTimeout", c.BootstrapTimeout.String()),
+	)
+}
+
 // RunFunc starts kubeglance with a parsed Config. It lives in main, which
 // is the only place allowed to wire infrastructure into services.
 type RunFunc func(ctx context.Context, c Config, log *slog.Logger) error

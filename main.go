@@ -39,7 +39,7 @@ func main() {
 }
 
 func run(ctx context.Context, c interfaces.Config, log *slog.Logger) error {
-	log.Info("starting", "version", version.Version, "interval", c.Interval, "retention", c.Retention)
+	log.Info("starting", "version", version.Version, "config", c)
 
 	store := domain.NewStore(c.Interval, c.Retention)
 	log.Info("history sized", "samplesPerEntity", store.Capacity())

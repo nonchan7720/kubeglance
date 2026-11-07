@@ -3,7 +3,9 @@ package interfaces
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -210,5 +212,43 @@ func TestRootHelpNamesEnv(t *testing.T) {
 		if !strings.Contains(out, s) {
 			t.Errorf("help does not mention %s:\n%s", s, out)
 		}
+	}
+}
+
+func TestConfigLogsEveryEffectiveSetting(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("KUBEGLANCE_RETENTION", "6h")
+	c, _, err := execute(t, "--peer-host", "kg-peers.ns.svc", "--snapshot", "/data/s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	slog.New(slog.NewJSONHandler(&buf, nil)).Info("starting", "config", *c)
+	var line struct {
+		Config map[string]any `json:"config"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+		t.Fatalf("%v: %s", err, buf.String())
+	}
+	want := map[string]any{
+		"addr": ":8080", "kubeconfig": "", "interval": "15s", "retention": "6h0m0s",
+		"peerHost": "kg-peers.ns.svc", "peerPort": float64(8080), "podIP": "",
+		"snapshot": "/data/s", "snapshotEvery": "1m0s", "shutdownGrace": "5s", "logLevel": "info", "bootstrapTimeout": "2m0s",
+	}
+	if len(line.Config) != len(want) {
+		t.Errorf("config has %d fields, want %d: %v", len(line.Config), len(want), line.Config)
+	}
+	for k, v := range want {
+		if line.Config[k] != v {
+			t.Errorf("config.%s = %v (%T), want %v", k, line.Config[k], line.Config[k], v)
+		}
+	}
+}
+
+// TestConfigLogValueCoversEveryField fails when a field is added to Config
+// without adding it to the startup log line.
+func TestConfigLogValueCoversEveryField(t *testing.T) {
+	if got, want := len(Config{}.LogValue().Group()), reflect.TypeFor[Config]().NumField(); got != want {
+		t.Errorf("LogValue has %d attributes, Config has %d fields", got, want)
 	}
 }

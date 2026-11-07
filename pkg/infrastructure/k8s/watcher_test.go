@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -33,10 +34,10 @@ func TestWatcherResolvesOwnersAndSums(t *testing.T) {
 			OwnerReferences: []metav1.OwnerReference{ctrl("CronJob", "backup", "cj1")}}},
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "app", Name: "web-abc-x", OwnerReferences: []metav1.OwnerReference{ctrl("ReplicaSet", "web-abc", "rs1")}},
 			Spec: corev1.PodSpec{NodeName: "n1", Containers: []corev1.Container{
-				{Resources: corev1.ResourceRequirements{
+				{Name: "app", Resources: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{corev1.ResourceCPU: q("100m"), corev1.ResourceMemory: q("64Mi")},
 					Limits:   corev1.ResourceList{corev1.ResourceCPU: q("200m"), corev1.ResourceMemory: q("128Mi")}}},
-				{Resources: corev1.ResourceRequirements{
+				{Name: "proxy", Resources: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{corev1.ResourceCPU: q("50m")},
 					Limits:   corev1.ResourceList{corev1.ResourceCPU: q("100m"), corev1.ResourceMemory: q("128Mi")}}},
 			}}},
@@ -77,6 +78,13 @@ func TestWatcherResolvesOwnersAndSums(t *testing.T) {
 	if web.Limits.CPU != 300 || web.Limits.Memory != 256<<20 {
 		t.Errorf("web limits = %+v", web.Limits)
 	}
+	wantC := []domain.ContainerInfo{
+		{Name: "app", Requests: domain.Resource{CPU: 100, Memory: 64 << 20}, Limits: domain.Resource{CPU: 200, Memory: 128 << 20}},
+		{Name: "proxy", Requests: domain.Resource{CPU: 50}, Limits: domain.Resource{CPU: 100, Memory: 128 << 20}},
+	}
+	if !slices.Equal(web.Containers, wantC) {
+		t.Errorf("web containers = %+v, want %+v", web.Containers, wantC)
+	}
 
 	bk, _ := store.Pod(domain.PodKey{Namespace: "app", Name: "backup-123-y"})
 	if bk.Workload.Kind != domain.KindCronJob || bk.Workload.Name != "backup" {
@@ -109,8 +117,12 @@ func TestConvertRoundSumsContainers(t *testing.T) {
 		&metricsv1beta1.PodMetricsList{Items: []metricsv1beta1.PodMetrics{{
 			ObjectMeta: metav1.ObjectMeta{Namespace: "app", Name: "p"},
 			Containers: []metricsv1beta1.ContainerMetrics{
-				{Usage: corev1.ResourceList{corev1.ResourceCPU: q("10m"), corev1.ResourceMemory: q("10Mi")}},
-				{Usage: corev1.ResourceList{corev1.ResourceCPU: q("20m"), corev1.ResourceMemory: q("20Mi")}},
+				{Name: "app", Usage: corev1.ResourceList{corev1.ResourceCPU: q("10m"), corev1.ResourceMemory: q("10Mi")}},
+				{Name: "proxy", Usage: corev1.ResourceList{corev1.ResourceCPU: q("20m"), corev1.ResourceMemory: q("20Mi")}},
+			}}, {
+			ObjectMeta: metav1.ObjectMeta{Namespace: "app", Name: "single"},
+			Containers: []metricsv1beta1.ContainerMetrics{
+				{Name: "only", Usage: corev1.ResourceList{corev1.ResourceCPU: q("5m")}},
 			}}}},
 	)
 	if r.At.Nanosecond() != 0 {
@@ -122,5 +134,12 @@ func TestConvertRoundSumsContainers(t *testing.T) {
 	p := r.Pods[domain.PodKey{Namespace: "app", Name: "p"}]
 	if p.CPU != 30 || p.Memory != 30<<20 {
 		t.Errorf("pod usage = %+v", p)
+	}
+	c := r.Containers[domain.PodKey{Namespace: "app", Name: "p"}]
+	if len(c) != 2 || c["app"].CPU != 10 || c["proxy"].Memory != 20<<20 {
+		t.Errorf("containers = %+v", c)
+	}
+	if _, ok := r.Containers[domain.PodKey{Namespace: "app", Name: "single"}]; ok {
+		t.Error("a single-container pod got a container breakdown (its pod series is the container's)")
 	}
 }
