@@ -17,7 +17,10 @@ import (
 	"github.com/nonchan7720/kubeglance/pkg/services"
 )
 
-type synth struct{ t time.Time }
+// synth makes up rounds. gapFrom..gapTo is a stretch with no data at all
+// (as if no replica could poll), so the UI's gap rendering has something to
+// show.
+type synth struct{ t, gapFrom, gapTo time.Time }
 
 var pods = []domain.PodInfo{
 	{Key: domain.PodKey{Namespace: "app", Name: "web-7d9f-abcde"}, Node: "k3s-1", Workload: domain.WorkloadKey{Namespace: "app", Kind: "Deployment", Name: "web"}, Requests: domain.Resource{CPU: 100, Memory: 128 << 20}, Limits: domain.Resource{CPU: 500, Memory: 256 << 20}, Phase: "Running"},
@@ -31,6 +34,9 @@ var pods = []domain.PodInfo{
 func (s *synth) Poll(context.Context) (domain.Round, error) {
 	s.t = s.t.Add(15 * time.Second)
 	r := domain.Round{At: s.t, Pods: map[domain.PodKey]domain.Resource{}, Nodes: map[string]domain.Resource{}}
+	if !s.t.Before(s.gapFrom) && s.t.Before(s.gapTo) {
+		return r, nil
+	}
 	wave := 0.5 + 0.5*math.Sin(float64(s.t.Unix())/300)
 	for i, p := range pods {
 		base := float64(p.Requests.CPU) * (0.4 + wave*float64(i%3))
@@ -53,7 +59,8 @@ func main() {
 		{Name: "k3s-3", Ready: true, Allocatable: domain.Resource{CPU: 2000, Memory: 4 << 30}, Capacity: domain.Resource{CPU: 2000, Memory: 4 << 30}},
 	})
 	store.UpsertPods(pods)
-	src := &synth{t: time.Now().Add(-2 * time.Hour)}
+	now := time.Now()
+	src := &synth{t: now.Add(-2 * time.Hour), gapFrom: now.Add(-50 * time.Minute), gapTo: now.Add(-42 * time.Minute)}
 	col := services.NewCollector(store, src, log)
 	for range 480 { // two hours of history
 		col.PollOnce(context.Background())

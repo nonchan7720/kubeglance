@@ -21,6 +21,10 @@ func NewQuery(store *domain.Store) *Query {
 	return &Query{store: store, now: time.Now}
 }
 
+// sparkPoints is how many buckets a sparkline has at most: one every 30 s
+// over the default 30 min window, about one per 6 px on a 375 px screen.
+const sparkPoints = 60
+
 // WindowInfo is the window a view was computed over.
 type WindowInfo struct {
 	From     time.Time     `json:"from"`
@@ -53,6 +57,7 @@ type ClusterView struct {
 	Requests    domain.Resource `json:"requests"` // sum of live pods' requests
 	Limits      domain.Resource `json:"limits"`
 	Usage       domain.Stats    `json:"usage"` // sum of node usage over time
+	Spark       domain.Spark    `json:"spark"`
 }
 
 // Cluster computes the cluster view.
@@ -83,7 +88,9 @@ func (q *Query) Cluster(d time.Duration) ClusterView {
 		workloads[workloadOf(p)] = struct{}{}
 	}
 	v.Workloads = len(workloads)
-	v.Usage = domain.ComputeStats(domain.SumByInstant(nodeSeries...), w)
+	sum := domain.SumByInstant(nodeSeries...)
+	v.Usage = domain.ComputeStats(sum, w)
+	v.Spark = domain.Sparkline(sum, w, sparkPoints)
 	return v
 }
 
@@ -94,6 +101,7 @@ type NodeView struct {
 	Requests    domain.Resource `json:"requests"`
 	Limits      domain.Resource `json:"limits"`
 	Usage       domain.Stats    `json:"usage"`
+	Spark       domain.Spark    `json:"spark"`
 	CPURatio    float64         `json:"cpuRatio"`    // usage now / allocatable
 	MemoryRatio float64         `json:"memoryRatio"` // usage now / allocatable
 }
@@ -118,7 +126,9 @@ func (q *Query) Nodes(d time.Duration) NodesView {
 			continue
 		}
 		nv := &NodeView{NodeInfo: n}
-		nv.Usage = domain.ComputeStats(q.store.NodeSamples(n.Name, w.From), w)
+		samples := q.store.NodeSamples(n.Name, w.From)
+		nv.Usage = domain.ComputeStats(samples, w)
+		nv.Spark = domain.Sparkline(samples, w, sparkPoints)
 		nv.CPURatio = domain.Ratio(nv.Usage.Now.CPU, n.Allocatable.CPU)
 		nv.MemoryRatio = domain.Ratio(nv.Usage.Now.Memory, n.Allocatable.Memory)
 		byNode[n.Name] = nv
@@ -154,7 +164,8 @@ type WorkloadView struct {
 	Pods     int             `json:"pods"`
 	Requests domain.Resource `json:"requests"`
 	Limits   domain.Resource `json:"limits"`
-	Usage    domain.Stats    `json:"usage"`  // sum over pods, over time
+	Usage    domain.Stats    `json:"usage"` // sum over pods, over time
+	Spark    domain.Spark    `json:"spark"`
 	PerPod   domain.Resource `json:"perPod"` // Usage.Now / Pods
 	// RequestRatio is usage now / requests (0 when no request is set): above 1
 	// the workload is under-requested; well below, over-requested.
@@ -201,7 +212,9 @@ func (q *Query) Workloads(d time.Duration, namespace string) WorkloadsView {
 		a.view.Limits = a.view.Limits.Add(p.Limits)
 	}
 	for _, a := range byKey {
-		a.view.Usage = domain.ComputeStats(domain.SumByInstant(a.series...), w)
+		sum := domain.SumByInstant(a.series...)
+		a.view.Usage = domain.ComputeStats(sum, w)
+		a.view.Spark = domain.Sparkline(sum, w, sparkPoints)
 		if a.view.Pods > 0 {
 			a.view.PerPod = domain.Resource{
 				CPU:    a.view.Usage.Now.CPU / int64(a.view.Pods),
@@ -226,6 +239,7 @@ type PodView struct {
 	domain.PodInfo
 	Deleted      bool         `json:"deleted"`
 	Usage        domain.Stats `json:"usage"`
+	Spark        domain.Spark `json:"spark"`
 	LimitRatio   ratio        `json:"limitRatio"`   // usage now / limits (0 when unlimited)
 	RequestRatio ratio        `json:"requestRatio"` // usage now / requests
 }
@@ -264,10 +278,12 @@ func (q *Query) Pods(d time.Duration, f PodFilter) PodsView {
 			continue
 		}
 		pv := PodView{PodInfo: p, Deleted: q.store.PodDeleted(p.Key)}
-		pv.Usage = domain.ComputeStats(q.store.PodSamples(p.Key, w.From), w)
+		samples := q.store.PodSamples(p.Key, w.From)
+		pv.Usage = domain.ComputeStats(samples, w)
 		if pv.Deleted && pv.Usage.Samples == 0 {
 			continue
 		}
+		pv.Spark = domain.Sparkline(samples, w, sparkPoints)
 		pv.LimitRatio = ratio{domain.Ratio(pv.Usage.Now.CPU, p.Limits.CPU), domain.Ratio(pv.Usage.Now.Memory, p.Limits.Memory)}
 		pv.RequestRatio = ratio{domain.Ratio(pv.Usage.Now.CPU, p.Requests.CPU), domain.Ratio(pv.Usage.Now.Memory, p.Requests.Memory)}
 		v.Pods = append(v.Pods, pv)

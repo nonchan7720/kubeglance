@@ -170,6 +170,32 @@ func TestPodsViewNoLimitIsZeroRatio(t *testing.T) {
 	}
 }
 
+func TestViewsCarrySparklines(t *testing.T) {
+	_, q := fixture(t)
+	// 30 min window ending at t0+45 s: 60 clock-aligned buckets of 30 s, the
+	// last two ([t0, t0+30), [t0+30, t0+60)) hold the 4 rounds; the 58
+	// before are gaps because the store has no older history.
+	last2 := func(t *testing.T, name string, sp domain.Spark, cpu int64) {
+		t.Helper()
+		if len(sp.CPU) != 60 || sp.Bucket != 30*time.Second {
+			t.Fatalf("%s: %d points of %v", name, len(sp.CPU), sp.Bucket)
+		}
+		if sp.CPU[0] != nil {
+			t.Errorf("%s: first point = %d, want gap", name, *sp.CPU[0])
+		}
+		for _, p := range sp.CPU[58:] {
+			if p == nil || *p != cpu {
+				t.Errorf("%s: last points = %v, want %d", name, sp.CPU[58:], cpu)
+			}
+		}
+	}
+	last2(t, "cluster", q.Cluster(30*time.Minute).Spark, 1500)
+	last2(t, "node n1", q.Nodes(30 * time.Minute).Nodes[0].Spark, 1000)
+	last2(t, "workload db", q.Workloads(30*time.Minute, "").Workloads[0].Spark, 400)
+	last2(t, "workload web", q.Workloads(30*time.Minute, "").Workloads[1].Spark, 200)
+	last2(t, "pod db-0", q.Pods(30*time.Minute, PodFilter{}).Pods[0].Spark, 400)
+}
+
 func TestWindowIsCappedToRetention(t *testing.T) {
 	_, q := fixture(t)
 	v := q.Cluster(48 * time.Hour)

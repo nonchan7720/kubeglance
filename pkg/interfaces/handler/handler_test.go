@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -107,6 +108,52 @@ func TestAPIEndpoints(t *testing.T) {
 	}
 }
 
+func TestAPIIsGzippedWhenAccepted(t *testing.T) {
+	srv, col := newServer(t)
+	col.PollOnce(context.Background())
+	for _, path := range []string{"/api/v1/pods", "/internal/snapshot"} {
+		req, err := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// set by hand, so the client does not decompress transparently
+		req.Header.Set("Accept-Encoding", "gzip")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close() //nolint:errcheck // test
+		if resp.Header.Get("Content-Encoding") != "gzip" || !strings.Contains(resp.Header.Get("Vary"), "Accept-Encoding") {
+			t.Fatalf("%s: headers %v", path, resp.Header)
+		}
+		zr, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		var v map[string]any
+		if err := json.NewDecoder(zr).Decode(&v); err != nil {
+			t.Fatalf("%s: decode: %v", path, err)
+		}
+	}
+
+	var pods services.PodsView
+	resp := get(t, srv.URL+"/api/v1/pods", &pods) // the Go client asks for gzip itself
+	if !resp.Uncompressed || len(pods.Pods) != 1 || len(pods.Pods[0].Spark.CPU) == 0 {
+		t.Errorf("transparent gzip: uncompressed=%v pods=%+v", resp.Uncompressed, pods.Pods)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/status", nil)
+	req.Header.Set("Accept-Encoding", "identity")
+	plain, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plain.Body.Close() //nolint:errcheck // test
+	if plain.Header.Get("Content-Encoding") != "" {
+		t.Errorf("gzip without Accept-Encoding: %v", plain.Header)
+	}
+}
+
 func TestUIIsServed(t *testing.T) {
 	srv, _ := newServer(t)
 	resp, err := http.Get(srv.URL + "/") //nolint:gosec // test server URL
@@ -120,6 +167,24 @@ func TestUIIsServed(t *testing.T) {
 	for _, p := range []string{"/app.js", "/style.css", "/manifest.webmanifest", "/icon.svg"} {
 		if r := get(t, srv.URL+p, nil); r.StatusCode != http.StatusOK {
 			t.Errorf("%s = %d", p, r.StatusCode)
+		}
+	}
+}
+
+func TestAcceptsGzip(t *testing.T) {
+	for header, want := range map[string]bool{
+		"":                      false,
+		"gzip":                  true,
+		"gzip, deflate, br":     true,
+		"br;q=1.0, GZIP;q=0.5":  true,
+		"gzip;q=0":              false,
+		"gzip; q=0.000, br":     false,
+		"identity":              false,
+		"x-gzip":                false,
+		"deflate, gzip;q=0.001": true,
+	} {
+		if got := acceptsGzip(header); got != want {
+			t.Errorf("acceptsGzip(%q) = %v, want %v", header, got, want)
 		}
 	}
 }

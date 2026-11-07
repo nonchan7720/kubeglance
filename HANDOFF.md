@@ -30,7 +30,7 @@ Everything below builds, passes `go vet`, `golangci-lint run` (2.15.0, 0 issues)
 | metrics.k8s.io poll, informers with owner resolution (RS→Deployment, Job→CronJob, STS, DS, static pods) | `pkg/infrastructure/k8s/*.go` | done, tested with the fake clientset |
 | Peer discovery (headless Service) + snapshot fetch | `pkg/infrastructure/peer/peer.go` | done, tested with httptest |
 | Snapshot file (gzip JSON, atomic rename) | `pkg/infrastructure/snapshot/file.go` | done, tested |
-| HTTP API + embedded UI (4 screens, drill-down node→pods, workload→pods, window selector, PWA manifest, en/ja i18n) | `pkg/interfaces/handler/**` | done; UI checked by screenshot at 390 px (dark, en and ja) |
+| HTTP API + embedded UI (4 screens, drill-down node→pods, workload→pods, window selector, sparklines with gaps, namespace filter, sort toggle, PWA manifest, en/ja i18n, gzip) | `pkg/interfaces/handler/**` | done; UI checked by screenshot at 375 px (dark and light, en and ja); DICT key parity is a Go test |
 | `main.go` wiring, graceful shutdown; cobra command, flags/env | `main.go`, `pkg/interfaces/cmd.go` | done |
 | Synthetic-data dev server (`mise run dev`) | `internal/devserver/main.go` | done |
 | Helm chart (Deployment w/ RollingUpdate + preStop sleep, Service + headless `-peers`, RBAC read-only, optional PVC, Ingress) | `charts/kubeglance` | done, lints and renders |
@@ -61,7 +61,11 @@ mise run run                    # real cluster via your kubeconfig
 - **A deleted pod stays in the store until `Prune` drops it after the retention**, so a workload's history survives a rollout. `Query.Workloads` counts only live pods in `Pods` but sums every pod's samples. That is intentional.
 - **Readiness = first round recorded.** During a rolling update the peer copy happens *before* the first poll, so a Ready replica always has the full window.
 - **The UI is embedded at build time** (`go:embed`). `go run ./internal/devserver` must be restarted to see static changes.
-- **UI strings live in `DICT` at the top of `app.js`** (en + ja, same keys). Every visible string goes through `t()`; static HTML uses `data-i18n` / `data-i18n-html`. Adding a language = adding one object.
+- **UI strings live in `DICT` at the top of `app.js`** (en + ja, same keys; `pkg/interfaces/handler/ui/ui_test.go` fails otherwise, and on a `t('key')` / `data-i18n*` key missing from `DICT.en`). Every visible string goes through `t()`; static HTML uses `data-i18n` / `data-i18n-html` / `data-i18n-label` (aria-label). Adding a language = adding one object.
+- **Sparkline buckets are aligned to the clock** (`domain.Sparkline`), not to "now − window": otherwise each 15 s refresh regroups the samples and the shape wobbles. The bucket is ≥ 2 steps so one late round is not drawn as a gap; the empty bucket that holds "now" is dropped because the next round simply has not landed. It is a picture; never compute a statistic from it.
+- **Every JSON response goes through `writeJSON`**, which gzips when asked. Do not write JSON to the `ResponseWriter` directly.
+- **The bar's scale** is the limit, else allocatable, else `max(2 × request, 1.1 × window max)`: a pod far over its request must not be clipped flat at 100 %. The sparkline uses the same scale.
+- **`[hidden]` is forced to `display: none`** in `style.css` because `.crumb` and `.tools` set `display: flex`, which would otherwise win over the attribute.
 - **`Limits` is zeroed when any container has no limit** (`podInfo`): a pod is only as limited as its least limited container. The UI then shows "% of request" instead.
 
 ## Branch rulesets
