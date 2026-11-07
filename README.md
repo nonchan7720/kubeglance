@@ -13,7 +13,7 @@ kubeglance answers one question in under ten seconds: *what is using my cluster'
 | **Workload** (Deployment / StatefulSet / DaemonSet / CronJob) | how loaded is this service, per pod? | should I scale it? |
 | **Pod** | which single pod is hot? | what do I look at first? |
 
-Every number is shown as **now · average · median · p95** over a window (5 m to 24 h), against the pod's requests and limits or the node's allocatable, as a bar you can read with one thumb.
+Every number is shown as **now · average · median · p95** over a window (5 m to 24 h), against the pod's requests and limits or the node's allocatable, as a bar you can read with one thumb. Under each bar a sparkline shows the window's shape on the same scale, with the request as a dashed line and gaps shaded, so "has it been like this for 30 minutes?" is one glance. Workloads and pods can be filtered by namespace and sorted by CPU, memory or name.
 
 - **One static binary, one Pod.** No database, no Prometheus, no Grafana. metrics-server (which k3s ships with) is the only data source.
 - **Short-term history in memory.** A bounded ring buffer per pod and node; about 10 MB for 100 pods over 24 h at 15 s. See [Memory](#memory).
@@ -71,6 +71,8 @@ Everything the UI shows is JSON under `/api/v1`, with `?window=30m` (default) on
 | `GET /internal/snapshot` | the whole history (what peers copy) |
 
 Statistics are computed from raw samples, never from averages of averages. `coverage` on every stats object is the fraction of the window that has samples; the UI shows gaps instead of silently shrinking the window.
+
+Every row also carries a `spark` object for drawing: about 60 buckets (`bucket` wide, from `start`, aligned to the clock so a refresh slides the picture instead of reshaping it), each the mean of its samples, or `null` for a gap. It is a picture only; no statistic is derived from it. Responses are gzipped when the client sends `Accept-Encoding: gzip`.
 
 ## Memory
 
