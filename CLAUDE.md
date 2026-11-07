@@ -15,7 +15,7 @@ kubeglance answers one question from a phone in under ten seconds: **"what is ea
 - Four levels, each for one decision: **Cluster** (headroom), **Node** (imbalance → rebalance?), **Workload** (Deployment / StatefulSet / DaemonSet load → scale?), **Pod** (a single hot spot).
 - Every number is shown as *now / 30 min avg / 30 min median / p95* against requests and limits. The window is configurable; the statistics are computed from raw samples, never from averages of averages.
 - One static binary, one Pod, no database, no Prometheus. Memory for history is a bounded in-process ring buffer (see README "Memory").
-- Zero-downtime updates with `replicas: 2`: a starting replica copies the history from a running peer before it serves. Persistence to a bbolt file is an optional safety net, not the mechanism.
+- Zero-downtime updates with `replicas: 2`: a starting replica copies the history from a running peer before it serves. Persistence to a gzip JSON snapshot file is an optional safety net, not the mechanism.
 - metrics-server is the only metrics source and is polled at its own resolution (15 s). Never poll faster; never add load to kubelets.
 - Gaps in the data (a replica that could not poll) are shown as gaps. Statistics over a window with gaps say so; they never silently shrink the window.
 - Mobile first: the UI must be usable on a 375 px wide screen with one thumb. Desktop is a bonus.
@@ -26,7 +26,7 @@ kubeglance answers one question from a phone in under ten seconds: **"what is ea
 ```
 pkg/domain          series (ring buffer), statistics, hierarchy aggregation. Imports nothing in the repo.
 pkg/services        collector (poll → store), query (aggregate by level), peer sync. Imports domain only.
-pkg/infrastructure  metrics-server client, informers (Pod → owner), bbolt snapshot, peer HTTP client. Imports domain only.
+pkg/infrastructure  metrics-server client, informers (Pod → owner), snapshot file, peer HTTP client. Imports domain only.
 pkg/interfaces      HTTP API + embedded UI. Imports services and domain.
 main.go             wires infrastructure into services and services into interfaces.
 ```
@@ -47,7 +47,7 @@ main.go             wires infrastructure into services and services into interfa
 - Use releases that are **at least 7 days old**; Renovate enforces the same with `minimumReleaseAge`.
 - GitHub Actions: pin by commit SHA with the full semver as a comment.
 - Never load browser dependencies from a CDN. The UI is plain HTML / CSS / JS embedded with `go:embed`; no build step, no framework, no web fonts.
-- `CGO_ENABLED=0` everywhere; the image is `FROM scratch`.
+- `CGO_ENABLED=0` for every build; the image is `FROM scratch`. The only exception is `mise run test`, which enables cgo so `-race` works.
 
 ## Repository hygiene
 

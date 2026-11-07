@@ -54,6 +54,9 @@ run = "go vet ./..."
 run = "golangci-lint run ./..."
 
 [tasks.test]
+# tests run with the race detector, which needs cgo; only the tests, the
+# binary itself stays CGO_ENABLED=0
+env = { CGO_ENABLED = "1" }
 run = "go test -race -count=1 ./..."
 
 [tasks."helm:lint"]

@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up tools
+        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+      - run: mise run vet
+      - run: mise run lint
+      - run: mise run test
+      - run: mise run helm:lint
+      - run: mise run build
+      - name: no CDN in the UI
+        run: |
+          ! grep -rEn 'https?://' pkg/interfaces/handler/ui/static/ --include='*.html' --include='*.js' --include='*.css' | grep -vE 'w3.org|xmlns'
+
+  depgraph:
+    # Fails on import cycles, layer violations, duplicated and unused code
+    # (.depgraph.yml). Neo4j comes from compose.yaml (profile depgraph).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up tools
+        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+      - name: Run depgraph
+        run: mise run depgraph:ci
+      - name: Shutdown dependencies
+        if: always()
+        run: docker compose --profile depgraph down

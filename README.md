@@ -116,7 +116,10 @@ mise install         # Go, golangci-lint, helm, goreleaser (pinned in mise.toml)
 mise run ci          # vet + lint + test + helm lint + build
 mise run dev         # UI with synthetic data at http://127.0.0.1:8080
 mise run run         # against your current kubeconfig context
+mise run depgraph:watch   # dependency graph + findings (needs Docker for Neo4j)
 ```
+
+Releases: release-please opens a release PR from Conventional Commits on `main`; merging it tags `vX.Y.Z` and goreleaser publishes binaries, multi-arch images (`ghcr.io/nonchan7720/kubeglance`) and the Helm chart (`oci://ghcr.io/nonchan7720/charts/kubeglance`). Every other push to `main` publishes a `vX.Y.Z-dev.<sha>` prerelease.
 
 ## License
 

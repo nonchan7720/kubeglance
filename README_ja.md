@@ -116,7 +116,10 @@ mise install         # Go, golangci-lint, helm, goreleaser（mise.toml で固定
 mise run ci          # vet + lint + test + helm lint + build
 mise run dev         # 合成データの UI を http://127.0.0.1:8080 で
 mise run run         # 現在の kubeconfig コンテキストに対して実行
+mise run depgraph:watch   # 依存グラフと Findings（Neo4j 用に Docker が必要）
 ```
+
+リリース: `main` の Conventional Commits から release-please がリリース PR を作り、マージすると `vX.Y.Z` タグが打たれ、goreleaser がバイナリ・マルチアーキイメージ（`ghcr.io/nonchan7720/kubeglance`）・Helm chart（`oci://ghcr.io/nonchan7720/charts/kubeglance`）を公開します。それ以外の `main` への push は `vX.Y.Z-dev.<sha>` のプレリリースになります。
 
 ## ライセンス
 

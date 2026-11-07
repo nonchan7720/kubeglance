@@ -21,7 +21,7 @@ The design was settled in conversation with the owner, and these decisions are *
 
 ## State of the code (as of this hand-off)
 
-Everything below builds, passes `go vet`, `golangci-lint run` (2.15.0, 0 issues), `go test -race ./...`, `helm lint` and `helm template`.
+Everything below builds, passes `go vet`, `golangci-lint run` (2.15.0, 0 issues), `go test -race ./...` (the test task enables cgo for the race detector only; the binary stays `CGO_ENABLED=0`), `helm lint` and `helm template`.
 
 | area | file(s) | status |
 |---|---|---|
@@ -34,7 +34,7 @@ Everything below builds, passes `go vet`, `golangci-lint run` (2.15.0, 0 issues)
 | `main.go` wiring, flags/env, graceful shutdown | `main.go` | done |
 | Synthetic-data dev server (`mise run dev`) | `internal/devserver/main.go` | done |
 | Helm chart (Deployment w/ RollingUpdate + preStop sleep, Service + headless `-peers`, RBAC read-only, optional PVC, Ingress) | `charts/kubeglance` | done, lints and renders |
-| CI (vet/lint/test/helm/build + PR title check), release (release-please → goreleaser → ghcr images + OCI chart) | `.github/workflows/*.yml` | written, **never run yet** |
+| CI (`ci.yaml`: vet/lint/test/helm/build + `depgraph` job on compose Neo4j), `check-pull-request-title.yaml` (status check `pr-title`), `auto-approve.yaml` (owner + Renovate patch PRs), `release.yaml` (release-please with a GitHub App token → goreleaser stable / `-dev.<sha>` prerelease → ghcr images + OCI chart) — all in the shape of nonchan7720/manifold | `.github/workflows/*.yaml`, `release-please/` | written; needs the `RELEASE_PLEASE_*` secrets, see TODO |
 | README (en/ja) | `README.md`, `README_ja.md` | written |
 
 **Not yet done**: see [TODO.md](TODO.md). The most important gap is that nothing has been run against a real cluster.
@@ -63,6 +63,10 @@ mise run run                    # real cluster via your kubeconfig
 - **The UI is embedded at build time** (`go:embed`). `go run ./internal/devserver` must be restarted to see static changes.
 - **UI strings live in `DICT` at the top of `app.js`** (en + ja, same keys). Every visible string goes through `t()`; static HTML uses `data-i18n` / `data-i18n-html`. Adding a language = adding one object.
 - **`Limits` is zeroed when any container has no limit** (`podInfo`): a pod is only as limited as its least limited container. The UI then shows "% of request" instead.
+
+## Branch rulesets
+
+Copied from manifold: **CI check** (required status checks `ci` and `pr-title` on `main` and `release/v*`, no deletion / force push) and **PR Approve** (one approval, squash only; bypass for admins, Renovate and the release app). `auto-approve.yaml` is what satisfies the approval for the owner's own PRs. The `pr-title` job id must not be renamed without updating the ruleset.
 
 ## Repository bootstrap
 

@@ -57,5 +57,5 @@ consistency_checks:
       - parallel:
           - { name: vet-all, cmd: "go vet ./...", files: false }
           - { name: lint, cmd: "golangci-lint run ./...", files: false }
-          - { name: test-all, cmd: "go test -race ./...", files: false }
+          - { name: test-all, cmd: "CGO_ENABLED=1 go test -race ./...", files: false }
       - { name: build, cmd: "CGO_ENABLED=0 go build -o bin/kubeglance .", files: false }

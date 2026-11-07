@@ -1,0 +1,80 @@
+version: 2
+# Prerelease build of every push to main: v<next>-dev.<sha>. Same artifacts as a
+# release, marked prerelease, and no `latest` image tag.
+project_name: kubeglance
+
+builds:
+  - id: kubeglance
+    main: .
+    binary: kubeglance
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64, arm]
+    goarm: ["7"]
+    ignore:
+      - { goos: darwin, goarch: arm }
+      - { goos: windows, goarch: arm }
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/nonchan7720/kubeglance/pkg/version.Version={{ .Version }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE, NOTICE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+dockers:
+  - image_templates: ["ghcr.io/nonchan7720/kubeglance:{{ .Version }}-amd64"]
+    use: buildx
+    goarch: amd64
+    dockerfile: Dockerfile
+    build_flag_templates: &labels
+      - --platform=linux/amd64
+      - --label=org.opencontainers.image.title=kubeglance
+      - --label=org.opencontainers.image.source=https://github.com/nonchan7720/kubeglance
+      - --label=org.opencontainers.image.version={{ .Version }}
+      - --label=org.opencontainers.image.licenses=Apache-2.0
+  - image_templates: ["ghcr.io/nonchan7720/kubeglance:{{ .Version }}-arm64"]
+    use: buildx
+    goarch: arm64
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - --platform=linux/arm64
+      - --label=org.opencontainers.image.title=kubeglance
+      - --label=org.opencontainers.image.source=https://github.com/nonchan7720/kubeglance
+      - --label=org.opencontainers.image.version={{ .Version }}
+      - --label=org.opencontainers.image.licenses=Apache-2.0
+  - image_templates: ["ghcr.io/nonchan7720/kubeglance:{{ .Version }}-armv7"]
+    use: buildx
+    goarch: arm
+    goarm: "7"
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - --platform=linux/arm/v7
+      - --label=org.opencontainers.image.title=kubeglance
+      - --label=org.opencontainers.image.source=https://github.com/nonchan7720/kubeglance
+      - --label=org.opencontainers.image.version={{ .Version }}
+      - --label=org.opencontainers.image.licenses=Apache-2.0
+
+docker_manifests:
+  - name_template: ghcr.io/nonchan7720/kubeglance:{{ .Version }}
+    image_templates:
+      - ghcr.io/nonchan7720/kubeglance:{{ .Version }}-amd64
+      - ghcr.io/nonchan7720/kubeglance:{{ .Version }}-arm64
+      - ghcr.io/nonchan7720/kubeglance:{{ .Version }}-armv7
+release:
+  github:
+    owner: nonchan7720
+    name: kubeglance
+  draft: false
+  prerelease: true
+
+changelog:
+  disable: true # release-please writes CHANGELOG.md

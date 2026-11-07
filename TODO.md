@@ -12,7 +12,8 @@ Ordered by what unblocks the most. Tick items in the PR that does them; keep thi
 
 ## 1. First release
 
-- [ ] Open the first PR from a branch, let CI run, fix what breaks (the workflows have never run).
+- [ ] Repository secrets `RELEASE_PLEASE_CLIENT_ID` and `RELEASE_PLEASE_APP_PRIVATE_PEM` (the same GitHub App as manifold, installed on this repo): release-please and goreleaser run with its token. Until they exist the `Release please` workflow fails.
+- [ ] Watch the first `Release please` run on `main` (prerelease path) and the first release PR; fix what breaks (the workflows were ported from manifold and have not run here yet).
 - [ ] Make sure `GITHUB_TOKEN` can push to `ghcr.io/nonchan7720/kubeglance` and `ghcr.io/nonchan7720/charts` (package visibility, "Inherit access from source repository").
 - [ ] Tag `v0.1.0` via release-please; verify the multi-arch image (`amd64`, `arm64`, `armv7` for Raspberry Pi) and `helm install oci://...` from a clean machine.
 - [ ] Add `icon` to `Chart.yaml` (helm lint INFO) and a logo SVG under `docs/` (the CNCF Landscape needs an SVG logo anyway).
