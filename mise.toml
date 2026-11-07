@@ -36,7 +36,7 @@ run = "go mod tidy"
 
 [tasks.build]
 description = "Build ./bin/kubeglance"
-sources = ["main.go", "pkg/**/*", "go.mod", "go.sum"]
+sources = ["*.go", "pkg/**/*", "go.mod", "go.sum"]
 outputs = ["bin/kubeglance"]
 run = "go build -trimpath -ldflags '-s -w -X github.com/nonchan7720/kubeglance/pkg/version.Version=dev' -o bin/kubeglance ."
 

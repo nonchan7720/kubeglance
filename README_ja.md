@@ -40,7 +40,7 @@ linux / darwin / windows（amd64, arm64, armv7）のバイナリは [Releases](h
 
 ## 設定
 
-フラグ、または括弧内の環境変数。Helm chart は主要なものを `values.yaml` で公開しています。
+フラグ、または括弧内の環境変数。コマンドラインのフラグが環境変数より優先され、不正な値の環境変数は既定値に戻さず起動を止めます。`kubeglance --help` で一覧、`kubeglance --version` でバージョンを表示します。Helm chart は主要なものを `values.yaml` で公開しています。
 
 | フラグ | 既定値 | 意味 |
 |---|---|---|

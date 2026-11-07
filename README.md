@@ -40,7 +40,7 @@ Binaries for linux / darwin / windows (amd64, arm64, armv7) are on [Releases](ht
 
 ## Configuration
 
-Flags, or the environment variable in brackets. The Helm chart exposes the useful ones in `values.yaml`.
+Flags, or the environment variable in brackets; a flag on the command line wins over the variable, and a malformed variable stops the start-up instead of falling back to the default. `kubeglance --help` lists them, `kubeglance --version` prints the version. The Helm chart exposes the useful ones in `values.yaml`.
 
 | flag | default | meaning |
 |---|---|---|

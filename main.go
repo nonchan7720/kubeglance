@@ -10,8 +10,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -29,55 +27,17 @@ import (
 	"github.com/nonchan7720/kubeglance/pkg/version"
 )
 
-type config struct {
-	addr          string
-	kubeconfig    string
-	interval      time.Duration
-	retention     time.Duration
-	peerHost      string
-	peerPort      int
-	podIP         string
-	snapshotPath  string
-	snapshotEvery time.Duration
-	shutdownGrace time.Duration
-	logLevel      string
-	showVersion   bool
-}
-
-func parseFlags() config {
-	var c config
-	flag.StringVar(&c.addr, "addr", env("KUBEGLANCE_ADDR", ":8080"), "listen address")
-	flag.StringVar(&c.kubeconfig, "kubeconfig", "", "kubeconfig path (default: in-cluster, then $KUBECONFIG, then ~/.kube/config)")
-	flag.DurationVar(&c.interval, "interval", envDuration("KUBEGLANCE_INTERVAL", 15*time.Second), "poll interval; metrics-server refreshes every 15s, shorter is pointless")
-	flag.DurationVar(&c.retention, "retention", envDuration("KUBEGLANCE_RETENTION", 24*time.Hour), "how much history to keep in memory")
-	flag.StringVar(&c.peerHost, "peer-host", env("KUBEGLANCE_PEER_HOST", ""), "headless Service name of the replicas; empty disables peer bootstrap")
-	flag.IntVar(&c.peerPort, "peer-port", envInt("KUBEGLANCE_PEER_PORT", 8080), "port peers serve on")
-	flag.StringVar(&c.podIP, "pod-ip", env("POD_IP", ""), "this pod's IP, excluded from peers (downward API)")
-	flag.StringVar(&c.snapshotPath, "snapshot", env("KUBEGLANCE_SNAPSHOT", ""), "optional file to persist history to (gzip JSON); empty disables")
-	flag.DurationVar(&c.snapshotEvery, "snapshot-every", envDuration("KUBEGLANCE_SNAPSHOT_EVERY", time.Minute), "how often to write the snapshot")
-	flag.DurationVar(&c.shutdownGrace, "shutdown-grace", envDuration("KUBEGLANCE_SHUTDOWN_GRACE", 5*time.Second), "time to keep serving peers after SIGTERM so a new replica can copy the history")
-	flag.StringVar(&c.logLevel, "log-level", env("KUBEGLANCE_LOG_LEVEL", "info"), "debug | info | warn | error")
-	flag.BoolVar(&c.showVersion, "version", false, "print the version and exit")
-	flag.Parse()
-	return c
-}
-
 func main() {
-	c := parseFlags()
-	if c.showVersion {
-		fmt.Println("kubeglance", version.Version)
-		return
-	}
-	log := newLogger(c.logLevel)
-	if err := run(c, log); err != nil {
-		log.Error("kubeglance exited", "err", err)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	err := newRootCommand(run).ExecuteContext(ctx)
+	stop()
+	if err != nil {
+		slog.New(slog.NewJSONHandler(os.Stderr, nil)).Error("kubeglance exited", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(c config, log *slog.Logger) error {
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+func run(ctx context.Context, c config, log *slog.Logger) error {
 	log.Info("starting", "version", version.Version, "interval", c.interval, "retention", c.retention)
 
 	store := domain.NewStore(c.interval, c.retention)
@@ -144,38 +104,4 @@ func run(c config, log *slog.Logger) error {
 		return err
 	}
 	return nil
-}
-
-func newLogger(level string) *slog.Logger {
-	var lv slog.Level
-	if err := lv.UnmarshalText([]byte(level)); err != nil {
-		lv = slog.LevelInfo
-	}
-	return slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: lv}))
-}
-
-func env(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-func envDuration(key string, def time.Duration) time.Duration {
-	if v := os.Getenv(key); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			return d
-		}
-	}
-	return def
-}
-
-func envInt(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		var n int
-		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
-			return n
-		}
-	}
-	return def
 }
