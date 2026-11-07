@@ -36,6 +36,10 @@ With Argo CD, point an Application at the chart `oci://ghcr.io/nonchan7720/chart
 
 Requirements: Kubernetes ≥ 1.30 (for the preStop `sleep` action; set `preStopSleepSeconds: 0` on older clusters) and metrics-server.
 
+With two replicas the chart also renders a PodDisruptionBudget (`minAvailable: 1`), so a node drain never takes both replicas, and the history, at once. `networkPolicy.enabled: true` adds a NetworkPolicy: ingress on 8080 from the other replicas and from `networkPolicy.ingressFrom` (your Ingress controller), egress to DNS, the API server (`networkPolicy.apiServer`, which also serves the metrics API) and the replicas. It is off by default because those sources differ per cluster.
+
+The first log line, `starting`, carries the effective configuration (flags, environment and defaults combined) as a `config` object.
+
 Binaries for linux / darwin / windows (amd64, arm64, armv7) are on [Releases](https://github.com/nonchan7720/kubeglance/releases); run `kubeglance --kubeconfig ~/.kube/config` outside the cluster.
 
 ## Configuration
