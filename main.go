@@ -48,9 +48,11 @@ func run(ctx context.Context, c interfaces.Config, log *slog.Logger) error {
 	metrics := k8s.NewMetricsSource(clients.Metrics)
 
 	// poll exactly at metrics-server's resolution unless --interval says
-	// otherwise: faster reads every value twice, slower misses values
+	// otherwise: faster reads every value twice, slower misses values. The
+	// start-up guess only has to be close: in auto mode the collector follows
+	// the resolution every round reports, also when it changes later
 	interval := services.ResolveInterval(ctx, c.Interval, metrics.Resolution,
-		services.IntervalPolicy{Timeout: time.Minute, Retry: 5 * time.Second, Fallback: 15 * time.Second}, log)
+		services.IntervalPolicy{Timeout: 20 * time.Second, Retry: 5 * time.Second, Fallback: 15 * time.Second}, log)
 	store := domain.NewStore(interval, c.Retention)
 	log.Info("history sized", "interval", interval, "samplesPerEntity", store.Capacity())
 
@@ -59,6 +61,7 @@ func run(ctx context.Context, c interfaces.Config, log *slog.Logger) error {
 		return err
 	}
 	collector := services.NewCollector(store, metrics, log)
+	collector.FollowResolution(c.Interval == 0)
 	query := services.NewQuery(store)
 
 	// 1. serve at once: /healthz answers, so the liveness probe does not

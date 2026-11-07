@@ -11,9 +11,10 @@ image:
 # One replica works too; history is then lost on restart unless snapshot is on.
 replicaCount: 2
 
-# Poll interval. Empty follows metrics-server's --metric-resolution, detected
-# at start (15s on k3s; managed clusters may differ). Polling faster than
-# that resolution reads every value twice; set this only to override.
+# Poll interval. Empty follows metrics-server's --metric-resolution, also when
+# it changes while kubeglance runs (15s on k3s; managed clusters may differ).
+# Polling faster than that resolution reads every value twice; set this only
+# to fix the interval.
 interval: ""
 # How much history to keep in memory per replica. See README "Memory".
 retention: 24h

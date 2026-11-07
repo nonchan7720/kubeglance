@@ -66,6 +66,20 @@ func (s *Series) Add(x Sample) {
 	s.head = (s.head + 1) % len(s.buf)
 }
 
+// Resized returns a series of the given capacity holding the newest samples
+// of s that fit.
+func (s *Series) Resized(capacity int) *Series {
+	out := NewSeries(capacity)
+	all := s.All()
+	if len(all) > out.Cap() {
+		all = all[len(all)-out.Cap():]
+	}
+	for _, x := range all {
+		out.Add(x)
+	}
+	return out
+}
+
 // Last returns the newest sample.
 func (s *Series) Last() (Sample, bool) {
 	if s.n == 0 {

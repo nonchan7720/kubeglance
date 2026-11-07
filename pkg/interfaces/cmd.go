@@ -78,7 +78,7 @@ a flag on the command line wins over the variable.`,
 	f.SortFlags = false
 	f.StringVar(&c.Addr, "addr", ":8080", "listen address")
 	f.StringVar(&c.Kubeconfig, "kubeconfig", "", "kubeconfig path (default: in-cluster, then $KUBECONFIG, then ~/.kube/config)")
-	f.DurationVar(&c.Interval, "interval", 0, "poll interval; 0 follows metrics-server's --metric-resolution, detected at start (15s when it cannot be)")
+	f.DurationVar(&c.Interval, "interval", 0, "poll interval; 0 follows metrics-server's --metric-resolution, also when it changes while running (15s until it is known); a value fixes it")
 	f.DurationVar(&c.Retention, "retention", 24*time.Hour, "how much history to keep in memory")
 	f.StringVar(&c.PeerHost, "peer-host", "", "headless Service name of the replicas; empty disables peer bootstrap")
 	f.IntVar(&c.PeerPort, "peer-port", 8080, "port peers serve on")

@@ -38,7 +38,7 @@ Ordered by what unblocks the most. Tick items in the PR that does them; keep thi
 - [ ] NetworkPolicy template (ingress from Ingress controller only; egress to apiserver + DNS).
 - [ ] Structured startup log line that prints the effective config.
 
-- [x] Poll interval follows metrics-server's `--metric-resolution` (detected from the reported `window` at start), so managed clusters with another resolution are polled at theirs. A change of the resolution while kubeglance runs is picked up only on restart.
+- [x] Poll interval follows metrics-server's `--metric-resolution` (read from the `window` every poll reports), also when it changes while kubeglance runs, so managed clusters with another resolution are polled at theirs. `--interval` fixes it.
 
 ## 4. Toward the CNCF Landscape
 

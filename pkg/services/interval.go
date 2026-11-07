@@ -20,8 +20,11 @@ const (
 	maxResolution = 5 * time.Minute
 )
 
-// ResolveInterval returns the poll interval: configured when it is set (> 0),
-// else metrics-server's resolution as detect reports it. Polling at exactly
+// ResolveInterval returns the start-up poll interval: configured when it is
+// set (> 0), else metrics-server's resolution as detect reports it. In auto
+// mode this is only the starting point: the collector follows the resolution
+// each round reports (Collector.FollowResolution), so a fallback is corrected
+// within a few rounds. Polling at exactly
 // that resolution reads every new value once: faster would read the same
 // value twice (more memory, no information), slower would miss values. When
 // detection keeps failing or reports something outside [10s, 5m], it returns

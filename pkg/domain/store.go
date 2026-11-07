@@ -14,7 +14,7 @@ import (
 // dropped once their last sample is older than the retention.
 type Store struct {
 	mu        sync.RWMutex
-	interval  time.Duration
+	timeline  Timeline // the sampling interval over time; never empty
 	retention time.Duration
 	pods      map[PodKey]*entry[PodInfo]
 	nodes     map[string]*entry[NodeInfo]
@@ -39,15 +39,43 @@ func NewStore(interval, retention time.Duration) *Store {
 		retention = interval
 	}
 	return &Store{
-		interval:  interval,
+		timeline:  Timeline{{Step: interval}},
 		retention: retention,
 		pods:      map[PodKey]*entry[PodInfo]{},
 		nodes:     map[string]*entry[NodeInfo]{},
 	}
 }
 
-// Interval is the sampling interval the store was sized for.
-func (s *Store) Interval() time.Duration { return s.interval }
+// Interval is the sampling interval in effect now.
+func (s *Store) Interval() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.timeline.Current()
+}
+
+// Timeline is a copy of the sampling interval's history.
+func (s *Store) Timeline() Timeline {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append(Timeline(nil), s.timeline...)
+}
+
+// SetInterval changes the sampling interval (metrics-server's resolution
+// changed). The new grid starts at the first boundary of the new interval
+// after last, the newest recorded instant, so samples stay in time order.
+// Series grow at once when the interval got finer, so no history is
+// dropped; they shrink in Prune once the finer history left the retention.
+// Setting the current interval again does nothing.
+func (s *Store) SetInterval(interval time.Duration, last time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if interval <= 0 || interval == s.timeline.Current() {
+		return
+	}
+	since := later(last, s.timeline[len(s.timeline)-1].Since).Truncate(interval).Add(interval)
+	s.timeline = append(s.timeline, Resolution{Since: since, Step: interval})
+	s.resize()
+}
 
 // Retention is how far back samples are kept.
 func (s *Store) Retention() time.Duration { return s.retention }
@@ -57,10 +85,43 @@ func (s *Store) Retention() time.Duration { return s.retention }
 // on every replica whenever it started. Two replicas polling in the same
 // slot therefore record the same instant, and merging their histories
 // deduplicates instead of interleaving.
-func (s *Store) Slot(t time.Time) time.Time { return t.Truncate(s.interval) }
+func (s *Store) Slot(t time.Time) time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.slot(t)
+}
+
+// slot is Slot for callers holding the lock: on the grid of the interval in
+// effect at t.
+func (s *Store) slot(t time.Time) time.Time { return t.Truncate(s.timeline.At(t)) }
 
 // Capacity is the number of samples each series can hold.
-func (s *Store) Capacity() int { return int(s.retention/s.interval) + 1 }
+func (s *Store) Capacity() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.capacity()
+}
+
+// capacity is Capacity for callers holding the lock: the retention at the
+// finest interval still in the timeline (Prune drops what left the
+// retention), so a series holds the whole retention at any mix of intervals.
+func (s *Store) capacity() int { return int(s.retention/s.timeline.finest()) + 1 }
+
+// resize gives every series the current capacity, keeping the newest
+// samples, after the timeline changed.
+func (s *Store) resize() {
+	c := s.capacity()
+	for _, e := range s.pods {
+		if e.series.Cap() != c {
+			e.series = e.series.Resized(c)
+		}
+	}
+	for _, e := range s.nodes {
+		if e.series.Cap() != c {
+			e.series = e.series.Resized(c)
+		}
+	}
+}
 
 // Record appends one poll round at its Slot. Entities the round names but
 // the store has not seen through UpsertPods / UpsertNodes are created without
@@ -69,7 +130,7 @@ func (s *Store) Capacity() int { return int(s.retention/s.interval) + 1 }
 func (s *Store) Record(r Round) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	at := s.Slot(r.At)
+	at := s.slot(r.At)
 	for k, u := range r.Pods {
 		s.pod(k).series.Add(Sample{At: at, Usage: u})
 	}
@@ -79,11 +140,11 @@ func (s *Store) Record(r Round) {
 }
 
 func (s *Store) pod(k PodKey) *entry[PodInfo] {
-	return getOrCreate(s.pods, k, PodInfo{Key: k}, s.Capacity())
+	return getOrCreate(s.pods, k, PodInfo{Key: k}, s.capacity())
 }
 
 func (s *Store) node(n string) *entry[NodeInfo] {
-	return getOrCreate(s.nodes, n, NodeInfo{Name: n}, s.Capacity())
+	return getOrCreate(s.nodes, n, NodeInfo{Name: n}, s.capacity())
 }
 
 func getOrCreate[K comparable, I any](m map[K]*entry[I], k K, blank I, capacity int) *entry[I] {
@@ -146,6 +207,13 @@ func (s *Store) Prune(now time.Time) {
 	cutoff := now.Add(-s.retention)
 	maps.DeleteFunc(s.pods, func(_ PodKey, e *entry[PodInfo]) bool { return e.stale(cutoff) })
 	maps.DeleteFunc(s.nodes, func(_ string, e *entry[NodeInfo]) bool { return e.stale(cutoff) })
+	// an interval that ended before the retention describes no sample any
+	// more; once the finest one is gone the series shrink
+	for len(s.timeline) > 1 && !s.timeline[1].Since.After(cutoff) {
+		s.timeline = s.timeline[1:]
+	}
+	s.timeline[0].Since = time.Time{} // the first entry covers all before it
+	s.resize()
 }
 
 func (e *entry[I]) stale(cutoff time.Time) bool {
@@ -240,8 +308,11 @@ func (s *Store) NodeSamples(name string, from time.Time) []Sample {
 // Snapshot is the whole store as plain data: what one replica hands to a
 // starting peer, and what the optional persistence writes to disk.
 type Snapshot struct {
-	TakenAt   time.Time      `json:"takenAt"`
-	Interval  time.Duration  `json:"interval"`
+	TakenAt  time.Time     `json:"takenAt"`
+	Interval time.Duration `json:"interval"` // current; what a replica without Timeline reads
+	// Timeline is absent in snapshots from replicas that predate it; such a
+	// snapshot is one Interval throughout.
+	Timeline  Timeline       `json:"timeline,omitempty"`
 	Retention time.Duration  `json:"retention"`
 	Pods      []PodSnapshot  `json:"pods"`
 	Nodes     []NodeSnapshot `json:"nodes"`
@@ -267,7 +338,7 @@ type NodeSnapshot struct {
 func (s *Store) Snapshot() Snapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	snap := Snapshot{TakenAt: time.Now(), Interval: s.interval, Retention: s.retention}
+	snap := Snapshot{TakenAt: time.Now(), Interval: s.timeline.Current(), Timeline: append(Timeline(nil), s.timeline...), Retention: s.retention}
 	for _, e := range s.pods {
 		snap.Pods = append(snap.Pods, PodSnapshot{Info: e.info, HasInfo: e.hasInfo, DeletedAt: e.deletedAt, Samples: e.series.All()})
 	}
@@ -286,12 +357,34 @@ func (s *Store) Snapshot() Snapshot {
 func (s *Store) Merge(snap Snapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	in := snap.Timeline
+	if len(in) == 0 && snap.Interval > 0 {
+		in = Timeline{{Step: snap.Interval}}
+	}
+	s.timeline = s.timeline.merge(in, newest(snap))
+	s.resize()
 	for _, p := range snap.Pods {
-		s.pod(p.Info.Key).merge(p.Info, p.HasInfo, p.DeletedAt, s.slotted(p.Samples), s.Capacity())
+		s.pod(p.Info.Key).merge(p.Info, p.HasInfo, p.DeletedAt, s.slotted(p.Samples), s.capacity())
 	}
 	for _, n := range snap.Nodes {
-		s.node(n.Info.Name).merge(n.Info, n.HasInfo, n.DeletedAt, s.slotted(n.Samples), s.Capacity())
+		s.node(n.Info.Name).merge(n.Info, n.HasInfo, n.DeletedAt, s.slotted(n.Samples), s.capacity())
 	}
+}
+
+// newest is the latest sample instant in a snapshot.
+func newest(snap Snapshot) time.Time {
+	var t time.Time
+	for _, p := range snap.Pods {
+		if n := len(p.Samples); n > 0 {
+			t = later(t, p.Samples[n-1].At)
+		}
+	}
+	for _, n := range snap.Nodes {
+		if k := len(n.Samples); k > 0 {
+			t = later(t, n.Samples[k-1].At)
+		}
+	}
+	return t
 }
 
 // slotted returns samples moved to their Slot (a copy; the snapshot is not
@@ -300,7 +393,7 @@ func (s *Store) Merge(snap Snapshot) {
 func (s *Store) slotted(in []Sample) []Sample {
 	out := make([]Sample, len(in))
 	for i, x := range in {
-		out[i] = Sample{At: s.Slot(x.At), Usage: x.Usage}
+		out[i] = Sample{At: s.slot(x.At), Usage: x.Usage}
 	}
 	return out
 }

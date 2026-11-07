@@ -54,6 +54,17 @@ func (m *MetricsSource) Resolution(ctx context.Context) (time.Duration, error) {
 	if err != nil {
 		return 0, fmt.Errorf("list node metrics: %w", err)
 	}
+	r := resolution(nodes)
+	if r == 0 {
+		return 0, fmt.Errorf("no node metrics with a window yet")
+	}
+	return r, nil
+}
+
+// resolution is the median node Window rounded to the second, 0 when no
+// node reports one. Every poll carries it (Round.Resolution), so following a
+// change of metrics-server's resolution costs no extra call.
+func resolution(nodes *metricsv1beta1.NodeMetricsList) time.Duration {
 	var windows []time.Duration
 	for _, n := range nodes.Items {
 		if w := n.Window.Duration; w > 0 {
@@ -61,17 +72,18 @@ func (m *MetricsSource) Resolution(ctx context.Context) (time.Duration, error) {
 		}
 	}
 	if len(windows) == 0 {
-		return 0, fmt.Errorf("no node metrics with a window yet")
+		return 0
 	}
 	slices.Sort(windows)
-	return windows[len(windows)/2].Round(time.Second), nil
+	return windows[len(windows)/2].Round(time.Second)
 }
 
 func convertRound(at time.Time, nodes *metricsv1beta1.NodeMetricsList, pods *metricsv1beta1.PodMetricsList) domain.Round {
 	r := domain.Round{
-		At:    at.Truncate(time.Second),
-		Pods:  make(map[domain.PodKey]domain.Resource, len(pods.Items)),
-		Nodes: make(map[string]domain.Resource, len(nodes.Items)),
+		At:         at.Truncate(time.Second),
+		Pods:       make(map[domain.PodKey]domain.Resource, len(pods.Items)),
+		Nodes:      make(map[string]domain.Resource, len(nodes.Items)),
+		Resolution: resolution(nodes),
 	}
 	for _, n := range nodes.Items {
 		r.Nodes[n.Name] = toResource(n.Usage)

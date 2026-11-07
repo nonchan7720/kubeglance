@@ -44,6 +44,20 @@ func TestResolutionIsTheMedianNodeWindowInWholeSeconds(t *testing.T) {
 	}
 }
 
+func TestEveryRoundReportsTheResolution(t *testing.T) {
+	r := convertRound(time.Now(),
+		&metricsv1beta1.NodeMetricsList{Items: []metricsv1beta1.NodeMetrics{
+			nodeWithWindow("n1", 10010*time.Millisecond), nodeWithWindow("n2", 9990*time.Millisecond),
+		}},
+		&metricsv1beta1.PodMetricsList{})
+	if r.Resolution != 10*time.Second {
+		t.Errorf("round resolution = %v, want 10s", r.Resolution)
+	}
+	if r := convertRound(time.Now(), &metricsv1beta1.NodeMetricsList{}, &metricsv1beta1.PodMetricsList{}); r.Resolution != 0 {
+		t.Errorf("no nodes: resolution = %v, want 0 (unknown)", r.Resolution)
+	}
+}
+
 func TestResolutionWithoutNodeMetricsIsAnError(t *testing.T) {
 	for name, src := range map[string]*MetricsSource{
 		"no nodes":    nodeMetrics(),
