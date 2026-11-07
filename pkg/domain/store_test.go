@@ -144,3 +144,54 @@ func TestSnapshotMergeDoesNotExceedCapacity(t *testing.T) {
 		t.Errorf("merged = %v, want newest 5", got)
 	}
 }
+
+func TestContainerSeries(t *testing.T) {
+	s := newTestStore()
+	p := PodKey{"app", "web-1"}
+	s.UpsertPods([]PodInfo{{Key: p, Containers: []ContainerInfo{{Name: "app"}, {Name: "proxy"}}}})
+	for i := range 3 {
+		s.Record(Round{
+			At:         at(i * 15),
+			Pods:       map[PodKey]Resource{p: {CPU: int64(10 + i), Memory: 30}},
+			Containers: map[PodKey]map[string]Resource{p: {"app": {CPU: int64(8 + i), Memory: 20}, "proxy": {CPU: 2, Memory: 10}}},
+		})
+	}
+	got := s.ContainerSamples(p, at(15))
+	if len(got) != 2 || len(got["app"]) != 2 || len(got["proxy"]) != 2 {
+		t.Fatalf("containers since 15 s = %v", got)
+	}
+	if got["app"][0].Usage.CPU != 9 || got["app"][1].Usage.CPU != 10 || got["proxy"][1].Usage.Memory != 10 {
+		t.Errorf("app = %v, proxy = %v", got["app"], got["proxy"])
+	}
+	if s.ContainerSamples(PodKey{"app", "other"}, time.Time{}) != nil {
+		t.Error("unknown pod has container samples")
+	}
+
+	// a peer copy carries the container series and merges them by instant
+	b := newTestStore()
+	b.Record(Round{At: at(45), Pods: map[PodKey]Resource{p: {CPU: 13}},
+		Containers: map[PodKey]map[string]Resource{p: {"app": {CPU: 11}, "proxy": {CPU: 2}}}})
+	b.Merge(s.Snapshot())
+	merged := b.ContainerSamples(p, time.Time{})
+	if len(merged["app"]) != 4 || merged["app"][3].Usage.CPU != 11 || len(merged["proxy"]) != 4 {
+		t.Errorf("merged containers = %v", merged)
+	}
+
+	// a snapshot from a replica that predates container series merges too
+	old := s.Snapshot()
+	for i := range old.Pods {
+		old.Pods[i].Containers = nil
+	}
+	c := newTestStore()
+	c.Merge(old)
+	if len(c.PodSamples(p, time.Time{})) != 3 || len(c.ContainerSamples(p, time.Time{})) != 0 {
+		t.Error("snapshot without containers did not merge cleanly")
+	}
+
+	// the container series go with their pod
+	s.RemovePod(p, at(50))
+	s.Prune(at(50).Add(2 * time.Minute))
+	if s.ContainerSamples(p, time.Time{}) != nil {
+		t.Error("container series outlived the pruned pod")
+	}
+}

@@ -4,7 +4,9 @@
 package handler
 
 import (
+	"compress/gzip"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -35,6 +37,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/nodes", h.nodes)
 	mux.HandleFunc("GET /api/v1/workloads", h.workloads)
 	mux.HandleFunc("GET /api/v1/pods", h.pods)
+	mux.HandleFunc("GET /api/v1/pods/{namespace}/{name}", h.pod)
 	mux.HandleFunc("GET /api/v1/status", h.status)
 	mux.HandleFunc("GET /internal/snapshot", h.snapshot)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -65,23 +68,53 @@ func window(r *http.Request) time.Duration {
 	return d
 }
 
-func (h *handler) writeJSON(w http.ResponseWriter, v any) {
+// writeJSON encodes v, gzipped when the client accepts it: with a sparkline
+// per row the pod list is mostly digits, which shrink several times over a
+// phone's connection. Peers fetching /internal/snapshot get the same, and
+// Go's client decompresses it transparently.
+func (h *handler) writeJSON(w http.ResponseWriter, r *http.Request, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if err := json.NewEncoder(w).Encode(v); err != nil {
+	w.Header().Add("Vary", "Accept-Encoding")
+	var out io.Writer = w
+	if acceptsGzip(r.Header.Get("Accept-Encoding")) {
+		w.Header().Set("Content-Encoding", "gzip")
+		zw, _ := gzip.NewWriterLevel(w, gzip.BestSpeed) // the level is valid, no error
+		defer func() {
+			if err := zw.Close(); err != nil {
+				h.Log.Debug("write response", "err", err)
+			}
+		}()
+		out = zw
+	}
+	if err := json.NewEncoder(out).Encode(v); err != nil {
 		h.Log.Debug("write response", "err", err)
 	}
 }
 
+// acceptsGzip reports whether an Accept-Encoding header allows gzip (and does
+// not refuse it with q=0).
+func acceptsGzip(header string) bool {
+	for part := range strings.SplitSeq(header, ",") {
+		coding, params, _ := strings.Cut(strings.TrimSpace(part), ";")
+		if !strings.EqualFold(strings.TrimSpace(coding), "gzip") {
+			continue
+		}
+		q := strings.ReplaceAll(strings.TrimSpace(params), " ", "")
+		return q != "q=0" && q != "q=0.0" && q != "q=0.00" && q != "q=0.000"
+	}
+	return false
+}
+
 func (h *handler) cluster(w http.ResponseWriter, r *http.Request) {
-	h.writeJSON(w, h.Query.Cluster(window(r)))
+	h.writeJSON(w, r, h.Query.Cluster(window(r)))
 }
 
 func (h *handler) nodes(w http.ResponseWriter, r *http.Request) {
-	h.writeJSON(w, h.Query.Nodes(window(r)))
+	h.writeJSON(w, r, h.Query.Nodes(window(r)))
 }
 
 func (h *handler) workloads(w http.ResponseWriter, r *http.Request) {
-	h.writeJSON(w, h.Query.Workloads(window(r), r.URL.Query().Get("namespace")))
+	h.writeJSON(w, r, h.Query.Workloads(window(r), r.URL.Query().Get("namespace")))
 }
 
 func (h *handler) pods(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +128,17 @@ func (h *handler) pods(w http.ResponseWriter, r *http.Request) {
 		}
 		f.Workload = &domain.WorkloadKey{Namespace: parts[0], Kind: parts[1], Name: parts[2]}
 	}
-	h.writeJSON(w, h.Query.Pods(window(r), f))
+	h.writeJSON(w, r, h.Query.Pods(window(r), f))
+}
+
+func (h *handler) pod(w http.ResponseWriter, r *http.Request) {
+	key := domain.PodKey{Namespace: r.PathValue("namespace"), Name: r.PathValue("name")}
+	v, ok := h.Query.Pod(window(r), key)
+	if !ok {
+		http.Error(w, "pod not in history", http.StatusNotFound)
+		return
+	}
+	h.writeJSON(w, r, v)
 }
 
 // Status is what the UI shows in its header.
@@ -106,8 +149,8 @@ type Status struct {
 	Collector services.Health `json:"collector"`
 }
 
-func (h *handler) status(w http.ResponseWriter, _ *http.Request) {
-	h.writeJSON(w, Status{
+func (h *handler) status(w http.ResponseWriter, r *http.Request) {
+	h.writeJSON(w, r, Status{
 		Version:   h.Version,
 		Interval:  h.Store.Interval(),
 		Retention: h.Store.Retention(),
@@ -115,8 +158,8 @@ func (h *handler) status(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (h *handler) snapshot(w http.ResponseWriter, _ *http.Request) {
-	h.writeJSON(w, h.Store.Snapshot())
+func (h *handler) snapshot(w http.ResponseWriter, r *http.Request) {
+	h.writeJSON(w, r, h.Store.Snapshot())
 }
 
 // ready is true once at least one round has been recorded, so a replica

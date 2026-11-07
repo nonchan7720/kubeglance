@@ -13,7 +13,7 @@ kubeglance answers one question in under ten seconds: *what is using my cluster'
 | **Workload** (Deployment / StatefulSet / DaemonSet / CronJob) | how loaded is this service, per pod? | should I scale it? |
 | **Pod** | which single pod is hot? | what do I look at first? |
 
-Every number is shown as **now · average · median · p95** over a window (5 m to 24 h), against the pod's requests and limits or the node's allocatable, as a bar you can read with one thumb.
+Every number is shown as **now · average · median · p95** over a window (5 m to 24 h), against the pod's requests and limits or the node's allocatable, as a bar you can read with one thumb. Under each bar a sparkline shows the window's shape on the same scale, with the request as a dashed line and gaps shaded, so "has it been like this for 30 minutes?" is one glance. Workloads and pods can be filtered by namespace and sorted by CPU, memory or name.
 
 - **One static binary, one Pod.** No database, no Prometheus, no Grafana. metrics-server (which k3s ships with) is the only data source.
 - **Short-term history in memory.** A bounded ring buffer per pod and node; about 10 MB for 100 pods over 24 h at 15 s. See [Memory](#memory).
@@ -70,11 +70,14 @@ Everything the UI shows is JSON under `/api/v1`, with `?window=30m` (default) on
 | `GET /api/v1/nodes` | per node: usage stats, ratio of allocatable, pods and requests scheduled; plus the imbalance (spread, stddev) across nodes |
 | `GET /api/v1/workloads?namespace=` | per controller: pods, requests, limits, summed usage stats, per-pod usage, usage/request ratio |
 | `GET /api/v1/pods?namespace=&node=&workload=ns/Kind/name` | per pod: usage stats, usage/limit and usage/request ratios; pods gone during the window are included and flagged |
+| `GET /api/v1/pods/{namespace}/{name}` | one pod and each of its containers (spec order): usage stats against the container's own requests and limits; 404 when the pod is not in history |
 | `GET /api/v1/status` | version, interval, retention, collector health |
 | `GET /healthz`, `GET /readyz` | liveness; readiness once the first round is collected |
 | `GET /internal/snapshot` | the whole history (what peers copy) |
 
 Statistics are computed from raw samples, never from averages of averages. `coverage` on every stats object is the fraction of the window that has samples; the UI shows gaps instead of silently shrinking the window.
+
+Every row also carries a `spark` object for drawing: about 60 buckets (`bucket` wide, from `start`, aligned to the clock so a refresh slides the picture instead of reshaping it), each the mean of its samples, or `null` for a gap. It is a picture only; no statistic is derived from it. Responses are gzipped when the client sends `Accept-Encoding: gzip`.
 
 ## Memory
 
@@ -86,7 +89,9 @@ A sample is 16 bytes (CPU millicores + memory bytes; the timestamp is shared by 
 | 100 | ~9 MB |
 | 300 | ~28 MB |
 
-plus the Go runtime, the HTTP server and the client-go caches (10–20 MB). The chart requests 64 Mi and limits 128 Mi, which fits a Raspberry Pi k3s. Lower `--retention` to shrink it; the window selector is capped to the retention.
+A pod with more than one container keeps one more series per container for the Pod screen's breakdown (a single-container pod's series already is its container's), so a pod with one sidecar costs three series instead of one.
+
+On top of that come the Go runtime, the HTTP server and the client-go caches (10–20 MB). The chart requests 64 Mi and limits 128 Mi, which fits a Raspberry Pi k3s. Lower `--retention` to shrink it; the window selector is capped to the retention.
 
 ## How updates keep the history
 

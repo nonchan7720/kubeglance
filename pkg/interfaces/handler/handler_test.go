@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -22,7 +23,8 @@ func newServer(t *testing.T) (*httptest.Server, *services.Collector) {
 	store := domain.NewStore(15*time.Second, time.Hour)
 	key := domain.PodKey{Namespace: "app", Name: "web-1"}
 	store.UpsertNodes([]domain.NodeInfo{{Name: "n1", Ready: true, Allocatable: domain.Resource{CPU: 4000, Memory: 1 << 30}}})
-	store.UpsertPods([]domain.PodInfo{{Key: key, Node: "n1", Workload: domain.WorkloadKey{Namespace: "app", Kind: "Deployment", Name: "web"}}})
+	store.UpsertPods([]domain.PodInfo{{Key: key, Node: "n1", Workload: domain.WorkloadKey{Namespace: "app", Kind: "Deployment", Name: "web"},
+		Containers: []domain.ContainerInfo{{Name: "web"}}}})
 	col := services.NewCollector(store, staticSource{domain.Round{
 		At:    time.Now(),
 		Pods:  map[domain.PodKey]domain.Resource{key: {CPU: 100, Memory: 1 << 20}},
@@ -94,6 +96,15 @@ func TestAPIEndpoints(t *testing.T) {
 		t.Errorf("bad workload = %d", resp.StatusCode)
 	}
 
+	var pod services.PodDetailView
+	get(t, srv.URL+"/api/v1/pods/app/web-1?window=5m", &pod)
+	if pod.Pod.Key.Name != "web-1" || pod.Pod.Usage.Now.CPU != 100 || pod.Window.Duration != 5*time.Minute || len(pod.Containers) != 1 {
+		t.Errorf("pod detail = %+v", pod)
+	}
+	if resp := get(t, srv.URL+"/api/v1/pods/app/nope", nil); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unknown pod = %d", resp.StatusCode)
+	}
+
 	var st Status
 	resp := get(t, srv.URL+"/api/v1/status", &st)
 	if st.Version != "test" || !st.Collector.Healthy || resp.Header.Get("Cache-Control") != "no-store" {
@@ -104,6 +115,52 @@ func TestAPIEndpoints(t *testing.T) {
 	get(t, srv.URL+"/internal/snapshot", &snap)
 	if len(snap.Pods) != 1 || len(snap.Nodes) != 1 {
 		t.Errorf("snapshot = %+v", snap)
+	}
+}
+
+func TestAPIIsGzippedWhenAccepted(t *testing.T) {
+	srv, col := newServer(t)
+	col.PollOnce(context.Background())
+	for _, path := range []string{"/api/v1/pods", "/internal/snapshot"} {
+		req, err := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// set by hand, so the client does not decompress transparently
+		req.Header.Set("Accept-Encoding", "gzip")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close() //nolint:errcheck // test
+		if resp.Header.Get("Content-Encoding") != "gzip" || !strings.Contains(resp.Header.Get("Vary"), "Accept-Encoding") {
+			t.Fatalf("%s: headers %v", path, resp.Header)
+		}
+		zr, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		var v map[string]any
+		if err := json.NewDecoder(zr).Decode(&v); err != nil {
+			t.Fatalf("%s: decode: %v", path, err)
+		}
+	}
+
+	var pods services.PodsView
+	resp := get(t, srv.URL+"/api/v1/pods", &pods) // the Go client asks for gzip itself
+	if !resp.Uncompressed || len(pods.Pods) != 1 || len(pods.Pods[0].Spark.CPU) == 0 {
+		t.Errorf("transparent gzip: uncompressed=%v pods=%+v", resp.Uncompressed, pods.Pods)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/status", nil)
+	req.Header.Set("Accept-Encoding", "identity")
+	plain, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plain.Body.Close() //nolint:errcheck // test
+	if plain.Header.Get("Content-Encoding") != "" {
+		t.Errorf("gzip without Accept-Encoding: %v", plain.Header)
 	}
 }
 
@@ -120,6 +177,24 @@ func TestUIIsServed(t *testing.T) {
 	for _, p := range []string{"/app.js", "/style.css", "/manifest.webmanifest", "/icon.svg"} {
 		if r := get(t, srv.URL+p, nil); r.StatusCode != http.StatusOK {
 			t.Errorf("%s = %d", p, r.StatusCode)
+		}
+	}
+}
+
+func TestAcceptsGzip(t *testing.T) {
+	for header, want := range map[string]bool{
+		"":                      false,
+		"gzip":                  true,
+		"gzip, deflate, br":     true,
+		"br;q=1.0, GZIP;q=0.5":  true,
+		"gzip;q=0":              false,
+		"gzip; q=0.000, br":     false,
+		"identity":              false,
+		"x-gzip":                false,
+		"deflate, gzip;q=0.001": true,
+	} {
+		if got := acceptsGzip(header); got != want {
+			t.Errorf("acceptsGzip(%q) = %v, want %v", header, got, want)
 		}
 	}
 }
