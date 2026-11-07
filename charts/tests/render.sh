@@ -44,4 +44,9 @@ for set in "" "--set replicaCount=1" "--set networkPolicy.enabled=true"; do
   helm lint --quiet "$chart" $set >/dev/null || { echo "FAIL: helm lint $set"; fail=1; }
 done
 
+# the chart has an icon (Artifact Hub shows it; helm lint asks for one)
+! helm lint "$chart" 2>&1 | grep -q "icon is recommended" || { echo "FAIL: Chart.yaml has no icon"; fail=1; }
+grep -q '^icon: https://raw.githubusercontent.com/nonchan7720/kubeglance/main/docs/logo.svg$' "$chart/Chart.yaml" ||
+  { echo "FAIL: Chart.yaml icon is not docs/logo.svg"; fail=1; }
+
 exit "$fail"

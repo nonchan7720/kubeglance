@@ -1,4 +1,4 @@
-# kubeglance
+# <img src="docs/logo.svg" alt="" width="40" align="top"> kubeglance
 
 [English](README.md) | 日本語
 

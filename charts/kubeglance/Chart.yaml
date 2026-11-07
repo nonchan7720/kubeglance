@@ -5,6 +5,8 @@ type: application
 version: 0.1.0
 appVersion: "0.1.0"
 home: https://github.com/nonchan7720/kubeglance
+# docs/logo.svg is the UI's icon (a test keeps them identical)
+icon: https://raw.githubusercontent.com/nonchan7720/kubeglance/main/docs/logo.svg
 sources:
   - https://github.com/nonchan7720/kubeglance
 keywords: [kubernetes, monitoring, metrics-server, resources, mobile, k3s, homelab]
