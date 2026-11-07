@@ -1,0 +1,5 @@
+# paths depgraph does not scan at all (generated / vendored / fixtures)
+bin
+dist
+charts
+testdata

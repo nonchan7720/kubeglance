@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubeglance.fullname" . }}
+  labels:
+    {{- include "kubeglance.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  # Zero downtime, zero history loss: the new pod starts (maxSurge), copies
+  # the history from a running peer, polls once, becomes Ready, and only then
+  # is an old pod terminated (maxUnavailable 0). The old pod keeps serving
+  # peers for shutdown-grace seconds after SIGTERM.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "kubeglance.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kubeglance.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "kubeglance.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: kubeglance
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --addr=:8080
+            - --interval={{ .Values.interval }}
+            - --retention={{ .Values.retention }}
+            - --log-level={{ .Values.logLevel }}
+            - --peer-host={{ include "kubeglance.fullname" . }}-peers.{{ .Release.Namespace }}.svc
+            - --peer-port=8080
+            {{- if .Values.snapshot.enabled }}
+            - --snapshot=/data/kubeglance.snap
+            - --snapshot-every={{ .Values.snapshot.every }}
+            {{- end }}
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          {{- if gt (int .Values.preStopSleepSeconds) 0 }}
+          # Keep the old pod alive after endpoint removal starts, so the new
+          # pod's history copy and in-flight requests finish (needs k8s >= 1.30).
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: {{ .Values.preStopSleepSeconds }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.snapshot.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          {{- end }}
+      {{- if .Values.snapshot.enabled }}
+      volumes:
+        - name: data
+          {{- if .Values.snapshot.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "kubeglance.fullname" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

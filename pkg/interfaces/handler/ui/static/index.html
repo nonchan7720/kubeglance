@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="kubeglance">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+<title>kubeglance</title>
+</head>
+<body>
+<header>
+  <div class="title">
+    <h1>kubeglance</h1>
+    <span id="status" class="status" title="collector">·</span>
+  </div>
+  <div class="controls">
+    <button id="lang" class="lang" aria-label="language">EN</button>
+    <select id="window" aria-label="window">
+      <option value="5m">5m</option>
+      <option value="30m" selected>30m</option>
+      <option value="1h">1h</option>
+      <option value="6h">6h</option>
+      <option value="24h">24h</option>
+    </select>
+    <span id="updated" class="updated"></span>
+  </div>
+</header>
+
+<nav id="tabs">
+  <button data-level="cluster" class="active" data-i18n="tab.cluster">Cluster</button>
+  <button data-level="nodes" data-i18n="tab.nodes">Nodes</button>
+  <button data-level="workloads" data-i18n="tab.workloads">Workloads</button>
+  <button data-level="pods" data-i18n="tab.pods">Pods</button>
+</nav>
+
+<div id="crumb" class="crumb" hidden></div>
+<main id="main"><p class="muted" data-i18n="loading">loading…</p></main>
+
+<footer>
+  <span data-i18n-html="footer">now · <b>avg</b> · <i>median</i> · p95 over the window</span>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>

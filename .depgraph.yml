@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nonchan7720/depgraph/main/schema/depgraph.schema.json
+# kubeglance architecture (see README "Architecture").
+#
+#   interfaces  (HTTP handlers, embedded UI, CLI flags)  -> services, domain
+#   services    (collector, query, peer sync)            -> domain
+#   infrastructure (metrics-server, informers, bbolt)    -> domain
+#   domain      (series, stats, hierarchy)               -> nothing in the repo
+#
+# main.go wires infrastructure into services and services into interfaces.
+layers:
+  domain: ["pkg/domain/**"]
+  services: ["pkg/services/**"]
+  infrastructure: ["pkg/infrastructure/**"]
+  interfaces: ["pkg/interfaces/**"]
+forbidden:
+  domain: [services, infrastructure, interfaces]
+  services: [infrastructure, interfaces]
+  infrastructure: [services, interfaces]
+rules:
+  import-cycle: {severity: error}
+  layer-violation: {severity: error}
+  duplicate-code: {severity: warn, minTokens: 50, similarity: 0.8}
+  god-package: {severity: warn, fanIn: 10, fanOut: 3}
+  # pkg/domain is also the library surface other tools may import
+  unused-export: {ignore: ["pkg/version/**"]}
+ignore: ["**/testdata/**"]

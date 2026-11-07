@@ -1,0 +1,31 @@
+version: "2"
+
+linters:
+  # the defaults (errcheck, govet, ineffassign, staticcheck, unused) plus
+  # what gopls shows in the editor, so CI and the editor agree
+  enable:
+    - modernize
+    - forbidigo
+    - gosec
+    - revive
+  settings:
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^bufio\.NewScanner$
+          msg: use bufio.Reader; Scanner stops at lines over 64KB
+        - pattern: ^fmt\.Print(f|ln)?$
+          msg: use the slog logger; stdout is reserved for structured output
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [forbidigo, gosec]
+      - path: main\.go
+        linters: [forbidigo]
+
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes: [github.com/nonchan7720/kubeglance]

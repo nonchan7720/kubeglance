@@ -1,0 +1,17 @@
+{{- if and .Values.snapshot.enabled .Values.snapshot.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "kubeglance.fullname" . }}
+  labels:
+    {{- include "kubeglance.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.snapshot.persistence.accessMode }}
+  {{- with .Values.snapshot.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.snapshot.persistence.size }}
+{{- end }}

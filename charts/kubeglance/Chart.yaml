@@ -1,0 +1,13 @@
+apiVersion: v2
+name: kubeglance
+description: See what is eating your cluster, from your phone. Cluster / node / workload / pod usage as now, average, median and p95, from metrics-server, in one static binary.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/nonchan7720/kubeglance
+sources:
+  - https://github.com/nonchan7720/kubeglance
+keywords: [kubernetes, monitoring, metrics-server, resources, mobile, k3s, homelab]
+maintainers:
+  - name: nonchan7720
+    url: https://github.com/nonchan7720

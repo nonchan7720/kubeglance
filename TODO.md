@@ -1,0 +1,55 @@
+# TODO
+
+Ordered by what unblocks the most. Tick items in the PR that does them; keep this file honest.
+
+## 0. Prove it on a real cluster (blocks everything else)
+
+- [ ] Run `mise run run` against a k3s cluster with metrics-server; confirm all four views populate and owner resolution is right (Deployment / StatefulSet / DaemonSet / CronJob / static pods / an operator-owned pod).
+- [ ] `helm install` from `charts/kubeglance` with `replicaCount: 2`; confirm `/readyz` flips only after the peer copy + first poll.
+- [ ] Rolling update test: change the image tag, watch `kubectl get pods -w`, then check `GET /api/v1/cluster?window=1h` has `coverage: 1` on the new pod. This is the headline claim of the README; it must be measured, not assumed.
+- [ ] Measure real memory with `kubectl top pod` after 24 h and update the README table if it is off.
+- [ ] Confirm the preStop `sleep` action works on the owner's k3s version (needs ≥ 1.30); otherwise document `preStopSleepSeconds: 0` more loudly.
+
+## 1. First release
+
+- [ ] Open the first PR from a branch, let CI run, fix what breaks (the workflows have never run).
+- [ ] Make sure `GITHUB_TOKEN` can push to `ghcr.io/nonchan7720/kubeglance` and `ghcr.io/nonchan7720/charts` (package visibility, "Inherit access from source repository").
+- [ ] Tag `v0.1.0` via release-please; verify the multi-arch image (`amd64`, `arm64`, `armv7` for Raspberry Pi) and `helm install oci://...` from a clean machine.
+- [ ] Add `icon` to `Chart.yaml` (helm lint INFO) and a logo SVG under `docs/` (the CNCF Landscape needs an SVG logo anyway).
+- [ ] `THIRD_PARTY_NOTICES.md` generation (go-licenses) and a CI check that it is current, like depgraph.
+
+## 2. Product gaps the owner will hit first
+
+- [ ] **Sparkline per row**: the numbers exist (`Series`); a tiny inline SVG of the window per bar makes "has it been like this for 30 min" visible at a glance. Keep it dependency-free.
+- [ ] **Namespace filter** in the Workloads / Pods tabs (API already supports `?namespace=`).
+- [ ] **Sort toggle** (CPU / memory / name) on Nodes, Workloads, Pods.
+- [ ] **Container-level breakdown** on the Pod screen (metrics-server returns per-container usage; `convertRound` currently sums it).
+- [ ] **Downsampling for long retention**: raw 15 s for the last hour, 1-min means beyond, so `--retention=7d` stays small. Design note: stats over a downsampled range must be labelled as such (`coverage` already exists; add `resolution`).
+- [ ] **Gap rendering**: `coverage` is shown as a percentage; draw the gap in the sparkline once sparklines exist.
+- [ ] **Light theme polish**: only dark was screenshot-checked.
+- [ ] **i18n**: a test that `DICT.en` and `DICT.ja` have the same keys (a Go test can read the embedded `app.js` and compare), like claude-hook-gate does for its locales.
+
+## 3. Operations
+
+- [ ] Optional **basic auth / bearer token** flag for people who expose it without a tunnel (default off; document that Tailscale / Cloudflare Access is the recommended way).
+- [ ] `/metrics` Prometheus endpoint for kubeglance itself (poll duration, rounds, store size) — small, and expected in the Landscape's Monitoring category.
+- [ ] PodDisruptionBudget (`minAvailable: 1`) in the chart when `replicaCount > 1`.
+- [ ] NetworkPolicy template (ingress from Ingress controller only; egress to apiserver + DNS).
+- [ ] Structured startup log line that prints the effective config.
+
+## 4. Toward the CNCF Landscape
+
+Entry criteria (checked 2026-11): ~300 GitHub stars, fits an existing category (*Observability and Analysis → Monitoring*), SVG logo, active commits (removed after 3 months idle). The PR goes to `cncf/landscape` (`landscape.yml` + `hosted_logos/kubeglance.svg`).
+
+- [ ] Screenshots / a 15-second GIF of the phone UI in the README (people star what they can see).
+- [ ] Zenn / note article (Japanese) and a Reddit r/homelab + r/kubernetes post (English): "I built a 10 MB replacement for the one Grafana dashboard I actually looked at".
+- [ ] Submit to awesome-kubernetes, awesome-k3s, k3s discussions, Argo CD examples.
+- [ ] Add a `docs/comparison.md`: kubeglance vs `kubectl top` / k9s / Headlamp / Kubernetes Dashboard / Grafana (honest, including what we don't do).
+- [ ] Once ≥ 300 stars and 2+ releases: open the `cncf/landscape` PR.
+
+## Known limitations (document, maybe never fix)
+
+- No authentication built in (by design for v0; see 3).
+- Pods with no limits show "% of request"; pods with neither show raw numbers only.
+- metrics-server's own ~15 s staleness means "now" is up to ~30 s old.
+- With `replicaCount: 1`, a restart loses the history unless `snapshot.enabled`.

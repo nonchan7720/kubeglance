@@ -1,0 +1,61 @@
+# feedback-gate (nonchan7720/claude-hook-gate): checks run after Claude edits
+# files and before it stops. Commands mirror the mise tasks (`mise run ci`).
+# Schema: https://github.com/nonchan7720/claude-hook-gate/blob/main/scripts/gate.schema.json
+
+session_start:
+  # depgraph summary (stats + findings) into the context at session start.
+  # Needs `depgraph watch --root .` running in a terminal; silent without it.
+  - name: depgraph
+    timeout: 10
+    cmd: "command -v depgraph >/dev/null || exit 0; depgraph hook session-start --format text"
+
+rules:
+  # Go sources: gofmt / vet / tests of the edited package
+  - match: ["main.go", "pkg/**/*.go", "internal/**/*.go"]
+    per_file_dir: file # one directory = one package
+    timeout: 120
+    run:
+      - { name: fmt, cmd: "test -z \"$(gofmt -l .)\" || { gofmt -l .; exit 1; }" }
+      - { name: vet, cmd: "go vet ." }
+      - { name: test, cmd: "go test ." }
+    run_checks: [go-all]
+
+  # depgraph: debt this session added (import cycles, layer violations,
+  # duplicated code, unused exports). Passes without a running store.
+  - match: ["main.go", "pkg/**/*.go", "internal/**/*.go", "pkg/interfaces/handler/ui/static/**/*.js"]
+    timeout: 60
+    run:
+      - { name: depgraph, cmd: "command -v depgraph >/dev/null || exit 0; depgraph gate" }
+
+  # module / toolchain changes
+  - match: ["go.mod", "go.sum", "mise.toml"]
+    run: [{ name: mod, cmd: "go mod tidy -diff", files: false, timeout: 60 }]
+    run_checks: [go-all]
+
+  # Helm chart: lint + render on every template / values change
+  - match: ["charts/**"]
+    timeout: 120
+    run:
+      - { name: helm-lint, cmd: "command -v helm >/dev/null || exit 0; helm lint charts/kubeglance", files: false }
+      - { name: helm-template, cmd: "command -v helm >/dev/null || exit 0; helm template kubeglance charts/kubeglance >/dev/null", files: false }
+
+  # README.md and README_ja.md must be edited together
+  - match: ["README.md", "README_ja.md"]
+    run:
+      - name: readme-sync
+        cmd: |
+          case " $CLAUDE_GATE_FILES " in
+            *" README.md "*" README_ja.md "*|*" README_ja.md "*" README.md "*) exit 0 ;;
+            *) echo "README.md and README_ja.md must be updated together (see CLAUDE.md)"; exit 1 ;;
+          esac
+
+consistency_checks:
+  # same as `mise run ci` (vet + lint + test + build)
+  - name: go-all
+    timeout: 600
+    run:
+      - parallel:
+          - { name: vet-all, cmd: "go vet ./...", files: false }
+          - { name: lint, cmd: "golangci-lint run ./...", files: false }
+          - { name: test-all, cmd: "go test -race ./...", files: false }
+      - { name: build, cmd: "CGO_ENABLED=0 go build -o bin/kubeglance .", files: false }

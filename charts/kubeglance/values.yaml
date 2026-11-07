@@ -1,0 +1,89 @@
+# Default values for kubeglance.
+
+image:
+  repository: ghcr.io/nonchan7720/kubeglance
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Two replicas give zero-downtime updates with no history loss: a starting
+# replica copies the history from the running one before it becomes ready.
+# One replica works too; history is then lost on restart unless snapshot is on.
+replicaCount: 2
+
+# Poll interval. metrics-server refreshes every 15s; shorter is pointless.
+interval: 15s
+# How much history to keep in memory per replica. See README "Memory".
+retention: 24h
+logLevel: info
+# preStop sleep (seconds) before SIGTERM; 0 disables. Needs Kubernetes >= 1.30
+# (the Sleep lifecycle action). The binary also keeps serving peers for
+# --shutdown-grace after SIGTERM.
+preStopSleepSeconds: 5
+
+# Optional on-disk safety net for the case where every replica is down at
+# once. The peer copy, not this, is what makes rolling updates lossless.
+snapshot:
+  enabled: false
+  every: 1m
+  # emptyDir survives container restarts but not pod deletion; use a PVC for
+  # a node reboot. With replicaCount > 1 the volume must be ReadWriteMany or
+  # the pods must land on the same node; usually leave this off and rely on peers.
+  persistence:
+    enabled: false
+    storageClass: ""
+    size: 256Mi
+    accessMode: ReadWriteOnce
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: kubeglance.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 20m
+    memory: 64Mi
+  limits:
+    memory: 128Mi
+
+podAnnotations: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+# Spread the replicas over nodes so one node going down keeps the history.
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: kubeglance
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+rbac:
+  create: true

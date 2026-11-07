@@ -1,0 +1,8 @@
+kubeglance is starting.
+
+Open it:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kubeglance.fullname" . }} 8080:{{ .Values.service.port }}
+  → http://127.0.0.1:8080
+
+From your phone, put it behind Tailscale, Cloudflare Tunnel or an Ingress with auth;
+kubeglance itself has no authentication. Add it to your home screen: it is a PWA.

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":semanticCommits", "helpers:pinGitHubActionDigests"],
+  "minimumReleaseAge": "7 days",
+  "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    { "matchManagers": ["gomod"], "matchPackageNames": ["k8s.io/**"], "groupName": "kubernetes" },
+    { "matchManagers": ["mise"], "groupName": "toolchain" }
+  ]
+}
