@@ -2,6 +2,7 @@ package domain
 
 import (
 	"cmp"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -15,19 +16,14 @@ type Store struct {
 	mu        sync.RWMutex
 	interval  time.Duration
 	retention time.Duration
-	pods      map[PodKey]*podEntry
-	nodes     map[string]*nodeEntry
+	pods      map[PodKey]*entry[PodInfo]
+	nodes     map[string]*entry[NodeInfo]
 }
 
-type podEntry struct {
-	info      PodInfo
-	hasInfo   bool
-	deletedAt time.Time // zero while the pod exists
-	series    *Series
-}
-
-type nodeEntry struct {
-	info      NodeInfo
+// entry is one pod or node: its metadata (once an Upsert delivered it), when
+// it was removed (zero while it exists) and its samples.
+type entry[I any] struct {
+	info      I
 	hasInfo   bool
 	deletedAt time.Time
 	series    *Series
@@ -45,8 +41,8 @@ func NewStore(interval, retention time.Duration) *Store {
 	return &Store{
 		interval:  interval,
 		retention: retention,
-		pods:      map[PodKey]*podEntry{},
-		nodes:     map[string]*nodeEntry{},
+		pods:      map[PodKey]*entry[PodInfo]{},
+		nodes:     map[string]*entry[NodeInfo]{},
 	}
 }
 
@@ -73,22 +69,26 @@ func (s *Store) Record(r Round) {
 	}
 }
 
-func (s *Store) pod(k PodKey) *podEntry {
-	e, ok := s.pods[k]
+func (s *Store) pod(k PodKey) *entry[PodInfo] {
+	return getOrCreate(s.pods, k, PodInfo{Key: k}, s.Capacity())
+}
+
+func (s *Store) node(n string) *entry[NodeInfo] {
+	return getOrCreate(s.nodes, n, NodeInfo{Name: n}, s.Capacity())
+}
+
+func getOrCreate[K comparable, I any](m map[K]*entry[I], k K, blank I, capacity int) *entry[I] {
+	e, ok := m[k]
 	if !ok {
-		e = &podEntry{info: PodInfo{Key: k}, series: NewSeries(s.Capacity())}
-		s.pods[k] = e
+		e = &entry[I]{info: blank, series: NewSeries(capacity)}
+		m[k] = e
 	}
 	return e
 }
 
-func (s *Store) node(n string) *nodeEntry {
-	e, ok := s.nodes[n]
-	if !ok {
-		e = &nodeEntry{info: NodeInfo{Name: n}, series: NewSeries(s.Capacity())}
-		s.nodes[n] = e
-	}
-	return e
+// upsert sets an entry's metadata and marks it alive again.
+func (e *entry[I]) upsert(info I) {
+	e.info, e.hasInfo, e.deletedAt = info, true, time.Time{}
 }
 
 // UpsertPods sets the metadata of pods, keeping their history. A pod that
@@ -97,8 +97,7 @@ func (s *Store) UpsertPods(infos []PodInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, info := range infos {
-		e := s.pod(info.Key)
-		e.info, e.hasInfo, e.deletedAt = info, true, time.Time{}
+		s.pod(info.Key).upsert(info)
 	}
 }
 
@@ -117,8 +116,7 @@ func (s *Store) UpsertNodes(infos []NodeInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, info := range infos {
-		e := s.node(info.Name)
-		e.info, e.hasInfo, e.deletedAt = info, true, time.Time{}
+		s.node(info.Name).upsert(info)
 	}
 }
 
@@ -137,27 +135,29 @@ func (s *Store) Prune(now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cutoff := now.Add(-s.retention)
-	for k, e := range s.pods {
-		if stale(e.deletedAt, e.hasInfo, e.series, cutoff) {
-			delete(s.pods, k)
-		}
-	}
-	for n, e := range s.nodes {
-		if stale(e.deletedAt, e.hasInfo, e.series, cutoff) {
-			delete(s.nodes, n)
-		}
-	}
+	maps.DeleteFunc(s.pods, func(_ PodKey, e *entry[PodInfo]) bool { return e.stale(cutoff) })
+	maps.DeleteFunc(s.nodes, func(_ string, e *entry[NodeInfo]) bool { return e.stale(cutoff) })
 }
 
-func stale(deletedAt time.Time, hasInfo bool, series *Series, cutoff time.Time) bool {
-	if !deletedAt.IsZero() {
-		return deletedAt.Before(cutoff)
+func (e *entry[I]) stale(cutoff time.Time) bool {
+	if !e.deletedAt.IsZero() {
+		return e.deletedAt.Before(cutoff)
 	}
-	if hasInfo {
+	if e.hasInfo {
 		return false
 	}
-	last, ok := series.Last()
+	last, ok := e.series.Last()
 	return !ok || last.At.Before(cutoff)
+}
+
+// infos lists the metadata of every entry in m, sorted by cmp.
+func infos[K comparable, I any](m map[K]*entry[I], cmp func(a, b I) int) []I {
+	out := make([]I, 0, len(m))
+	for _, e := range m {
+		out = append(out, e.info)
+	}
+	slices.SortFunc(out, cmp)
+	return out
 }
 
 // Pod returns a pod's metadata (also for a removed pod still in history).
@@ -185,14 +185,9 @@ func (s *Store) PodDeletedAt(k PodKey) time.Time {
 func (s *Store) Pods() []PodInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]PodInfo, 0, len(s.pods))
-	for _, e := range s.pods {
-		out = append(out, e.info)
-	}
-	slices.SortFunc(out, func(a, b PodInfo) int {
+	return infos(s.pods, func(a, b PodInfo) int {
 		return cmp.Or(cmp.Compare(a.Key.Namespace, b.Key.Namespace), cmp.Compare(a.Key.Name, b.Key.Name))
 	})
-	return out
 }
 
 // PodSamples returns a pod's samples at or after from, oldest first.
@@ -220,12 +215,7 @@ func (s *Store) Node(name string) (NodeInfo, bool) {
 func (s *Store) Nodes() []NodeInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]NodeInfo, 0, len(s.nodes))
-	for _, e := range s.nodes {
-		out = append(out, e.info)
-	}
-	slices.SortFunc(out, func(a, b NodeInfo) int { return cmp.Compare(a.Name, b.Name) })
-	return out
+	return infos(s.nodes, func(a, b NodeInfo) int { return cmp.Compare(a.Name, b.Name) })
 }
 
 // NodeSamples returns a node's samples at or after from, oldest first.
@@ -285,25 +275,23 @@ func (s *Store) Merge(snap Snapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, p := range snap.Pods {
-		e := s.pod(p.Info.Key)
-		if !e.hasInfo && p.HasInfo {
-			e.info, e.hasInfo = p.Info, true
-		}
-		if e.deletedAt.IsZero() && !e.hasInfo {
-			e.deletedAt = p.DeletedAt
-		}
-		e.series = mergeSeries(e.series, p.Samples, s.Capacity())
+		s.pod(p.Info.Key).merge(p.Info, p.HasInfo, p.DeletedAt, p.Samples, s.Capacity())
 	}
 	for _, n := range snap.Nodes {
-		e := s.node(n.Info.Name)
-		if !e.hasInfo && n.HasInfo {
-			e.info, e.hasInfo = n.Info, true
-		}
-		if e.deletedAt.IsZero() && !e.hasInfo {
-			e.deletedAt = n.DeletedAt
-		}
-		e.series = mergeSeries(e.series, n.Samples, s.Capacity())
+		s.node(n.Info.Name).merge(n.Info, n.HasInfo, n.DeletedAt, n.Samples, s.Capacity())
 	}
+}
+
+// merge folds one snapshot entry into e: metadata only where e has none,
+// samples merged by instant.
+func (e *entry[I]) merge(info I, hasInfo bool, deletedAt time.Time, samples []Sample, capacity int) {
+	if !e.hasInfo && hasInfo {
+		e.info, e.hasInfo = info, true
+	}
+	if e.deletedAt.IsZero() && !e.hasInfo {
+		e.deletedAt = deletedAt
+	}
+	e.series = mergeSeries(e.series, samples, capacity)
 }
 
 // mergeSeries returns a new series holding the union of the existing series

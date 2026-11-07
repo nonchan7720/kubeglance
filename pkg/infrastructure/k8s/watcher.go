@@ -115,10 +115,7 @@ func (w *Watcher) onPod(o any) {
 }
 
 func (w *Watcher) onPodDelete(o any) {
-	if t, ok := o.(cache.DeletedFinalStateUnknown); ok {
-		o = t.Obj
-	}
-	if p, ok := o.(*corev1.Pod); ok {
+	if p, ok := deleted[*corev1.Pod](o); ok {
 		w.store.RemovePod(domain.PodKey{Namespace: p.Namespace, Name: p.Name}, w.now())
 	}
 }
@@ -132,12 +129,19 @@ func (w *Watcher) onNode(o any) {
 }
 
 func (w *Watcher) onNodeDelete(o any) {
+	if n, ok := deleted[*corev1.Node](o); ok {
+		w.store.RemoveNode(n.Name, w.now())
+	}
+}
+
+// deleted unwraps a delete event's object, which the informer may hand over
+// as a DeletedFinalStateUnknown tombstone after a missed watch event.
+func deleted[T any](o any) (T, bool) {
 	if t, ok := o.(cache.DeletedFinalStateUnknown); ok {
 		o = t.Obj
 	}
-	if n, ok := o.(*corev1.Node); ok {
-		w.store.RemoveNode(n.Name, w.now())
-	}
+	v, ok := o.(T)
+	return v, ok
 }
 
 // reresolveOwned re-upserts the pods owned by a controller that just became

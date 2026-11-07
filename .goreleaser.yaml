@@ -78,6 +78,7 @@ release:
     owner: nonchan7720
     name: kubeglance
   draft: false
+  prerelease: false
 
 changelog:
   disable: true # release-please writes CHANGELOG.md

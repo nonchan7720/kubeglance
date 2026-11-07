@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # `ci` is the status check the CI check ruleset requires.
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up tools
+        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+      - name: Run lint
+        # govet, staticcheck, modernize, ... (.golangci.yml); the binary is the
+        # one mise pins, hence install-mode none
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          install-mode: "none"
+          args: --timeout 5m
+      - name: Run tests
+        run: mise run test
+      - name: Build
+        run: mise run build
+      - name: no CDN in the UI
+        run: |
+          ! grep -rEn 'https?://' pkg/interfaces/handler/ui/static/ --include='*.html' --include='*.js' --include='*.css' | grep -vE 'w3.org|xmlns'
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up tools
+        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+      - run: mise run helm:lint
+
+  depgraph:
+    # Fails on import cycles, layer violations, duplicated and unused code
+    # (.depgraph.yml). Neo4j comes from compose.yaml (profile depgraph).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up tools
+        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+      - name: Run depgraph
+        run: mise run depgraph:ci
+      - name: Shutdown dependencies
+        if: always()
+        run: docker compose --profile depgraph down

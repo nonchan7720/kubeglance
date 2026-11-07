@@ -6,11 +6,21 @@ go = "1.27.3"
 golangci-lint = "2.15.0"
 helm = "3.19.0"
 "aqua:goreleaser/goreleaser" = "2.12.5"
+# dependency-graph analysis (.depgraph.yml): the claude-hook-gate session_start /
+# gate entries and CI (depgraph:ci) use it
+"github:nonchan7720/depgraph" = "0.1.7"
 
 [env]
 # pure Go, static binary; cross-compiles with plain `go build`
 CGO_ENABLED = "0"
 _.path = ["bin"]
+# depgraph's Neo4j (compose.yaml; local development credentials)
+NEO4J_URI = "bolt://localhost:27687"
+NEO4J_USER = "neo4j"
+NEO4J_PASSWORD = "kubeglance123"
+NEO4J_DATABASE = "neo4j"
+# depgraph's UI, moved off its default 7777
+DEPGRAPH_ADDR = "127.0.0.1:27777"
 
 # ---------------------------------------------------------------------------
 # setup / build
@@ -47,13 +57,14 @@ run = "go run ./internal/devserver"
 description = "gofmt + goimports via golangci-lint"
 run = "golangci-lint fmt ./..."
 
-[tasks.vet]
-run = "go vet ./..."
-
 [tasks.lint]
+# includes govet (see .golangci.yml), so there is no separate vet task
 run = "golangci-lint run ./..."
 
 [tasks.test]
+# tests run with the race detector, which needs cgo; only the tests, the
+# binary itself stays CGO_ENABLED=0
+env = { CGO_ENABLED = "1" }
 run = "go test -race -count=1 ./..."
 
 [tasks."helm:lint"]
@@ -61,12 +72,38 @@ run = ["helm lint charts/kubeglance", "helm template kubeglance charts/kubeglanc
 
 [tasks.ci]
 description = "Everything CI runs"
-depends = ["vet", "lint", "test", "helm:lint", "build"]
+depends = ["lint", "test", "helm:lint", "build"]
 
 # ---------------------------------------------------------------------------
-# dev
+# depgraph (dependency analysis; Neo4j from compose.yaml)
 # ---------------------------------------------------------------------------
 
-[tasks.depgraph]
-description = "Watch the dependency graph (needs depgraph on PATH and a container runtime)"
+[tasks.neo4j]
+description = "Start depgraph's Neo4j (compose.yaml) and wait until healthy"
+run = "docker compose up -d --wait neo4j"
+
+[tasks."neo4j:down"]
+description = "Stop Neo4j (the data volume is kept)"
+run = "docker compose stop neo4j"
+
+[tasks."depgraph:scan"]
+description = "Scan this repository into Neo4j and update CLAUDE.md"
+depends = ["neo4j"]
+run = "depgraph scan --root ."
+
+[tasks."depgraph:watch"]
+description = "Watch file changes, keep the graph and CLAUDE.md current (UI: http://127.0.0.1:27777)"
+depends = ["neo4j"]
 run = "depgraph watch --root ."
+
+[tasks."depgraph:ci"]
+description = "Same check as CI: scan and fail on warn-or-worse findings (CLAUDE.md untouched)"
+depends = ["neo4j"]
+# external provider so depgraph does not start its own Neo4j container; no
+# --reset, which would also erase the gate baselines (HookSession) mid-session
+run = 'depgraph scan --root . --neo4j-provider external --claude-md "" --fail-on warn'
+
+[tasks."depgraph:serve"]
+description = "depgraph's browser UI (http://127.0.0.1:27777)"
+depends = ["neo4j"]
+run = "depgraph serve --root ."
