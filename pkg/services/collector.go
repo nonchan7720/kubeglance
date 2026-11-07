@@ -33,23 +33,47 @@ func NewCollector(store *domain.Store, source MetricsSource, log *slog.Logger) *
 	return &Collector{store: store, source: source, log: log, now: time.Now}
 }
 
-// Run polls until ctx is done. The first poll happens immediately.
+// Run polls until ctx is done: once immediately, then in the middle of every
+// following slot (Store.Slot), so every replica polls each slot once
+// whenever it started, with half an interval of slack for a late timer or a
+// slow poll on either side.
 func (c *Collector) Run(ctx context.Context) {
-	c.PollOnce(ctx)
-	tick := time.NewTicker(c.store.Interval())
-	defer tick.Stop()
 	prune := time.NewTicker(time.Minute)
 	defer prune.Stop()
+	var last time.Time // slot of the last poll attempt
 	for {
+		now := c.now()
+		timer := time.NewTimer(nextPoll(last, now, c.store.Interval()).Sub(now))
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-tick.C:
+		case <-timer.C:
+			last = c.store.Slot(c.now())
 			c.PollOnce(ctx)
 		case now := <-prune.C:
+			timer.Stop()
 			c.store.Prune(now)
 		}
 	}
+}
+
+// nextPoll is when to poll after an attempt in slot last (zero: none yet):
+// the middle of the slot after last, or now when that middle has passed but
+// the slot it belongs to has not been polled. A slot is never polled twice
+// and never skipped while the process keeps up.
+func nextPoll(last, now time.Time, interval time.Duration) time.Time {
+	if last.IsZero() {
+		return now
+	}
+	slot := last.Add(interval)
+	if cur := now.Truncate(interval); cur.After(slot) {
+		slot = cur // the slot after last is gone; poll the current one
+	}
+	if mid := slot.Add(interval / 2); mid.After(now) {
+		return mid
+	}
+	return now
 }
 
 // PollOnce performs one poll and records it. Errors are logged and kept for

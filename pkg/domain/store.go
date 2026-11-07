@@ -68,25 +68,34 @@ func (s *Store) Interval() time.Duration { return s.interval }
 // Retention is how far back samples are kept.
 func (s *Store) Retention() time.Duration { return s.retention }
 
+// Slot is the instant a sample taken at t is recorded at: t rounded down to
+// the interval on an absolute grid (for 15 s: :00, :15, :30, :45), the same
+// on every replica whenever it started. Two replicas polling in the same
+// slot therefore record the same instant, and merging their histories
+// deduplicates instead of interleaving.
+func (s *Store) Slot(t time.Time) time.Time { return t.Truncate(s.interval) }
+
 // Capacity is the number of samples each series can hold.
 func (s *Store) Capacity() int { return int(s.retention/s.interval) + 1 }
 
-// Record appends one poll round. Entities the round names but the store has
-// not seen through UpsertPods / UpsertNodes are created without metadata; the
-// metadata is filled in when it arrives.
+// Record appends one poll round at its Slot. Entities the round names but
+// the store has not seen through UpsertPods / UpsertNodes are created without
+// metadata; the metadata is filled in when it arrives. A second round in the
+// same slot is ignored (Series.Add keeps the first).
 func (s *Store) Record(r Round) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	at := s.Slot(r.At)
 	for k, u := range r.Pods {
-		s.pod(k).series.Add(Sample{At: r.At, Usage: u})
+		s.pod(k).series.Add(Sample{At: at, Usage: u})
 	}
 	for n, u := range r.Nodes {
-		s.node(n).series.Add(Sample{At: r.At, Usage: u})
+		s.node(n).series.Add(Sample{At: at, Usage: u})
 	}
 	for k, cs := range r.Containers {
 		e := s.pod(k)
 		for name, u := range cs {
-			e.container(name, s.Capacity()).Add(Sample{At: r.At, Usage: u})
+			e.container(name, s.Capacity()).Add(Sample{At: at, Usage: u})
 		}
 	}
 }
@@ -318,23 +327,37 @@ func (s *Store) Snapshot() Snapshot {
 	return snap
 }
 
-// Merge adds a snapshot to the store: samples are merged by time (a sample
-// already present at the same instant is kept), capacity is respected, and
-// metadata the store lacks is taken from the snapshot.
+// Merge adds a snapshot to the store: incoming samples are moved to their
+// Slot, then merged by instant (a sample already present in that slot is
+// kept), capacity is respected, and metadata the store lacks is taken from
+// the snapshot. Slotting on the way in also collapses the history of a
+// replica that recorded raw poll times (before slots existed), so the first
+// rolling update onto this version does not double the samples either.
 func (s *Store) Merge(snap Snapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, p := range snap.Pods {
 		e := s.pod(p.Info.Key)
-		e.merge(p.Info, p.HasInfo, p.DeletedAt, p.Samples, s.Capacity())
+		e.merge(p.Info, p.HasInfo, p.DeletedAt, s.slotted(p.Samples), s.Capacity())
 		for name, samples := range p.Containers {
 			e.container(name, s.Capacity()) // so the map entry exists
-			e.containers[name] = mergeSeries(e.containers[name], samples, s.Capacity())
+			e.containers[name] = mergeSeries(e.containers[name], s.slotted(samples), s.Capacity())
 		}
 	}
 	for _, n := range snap.Nodes {
-		s.node(n.Info.Name).merge(n.Info, n.HasInfo, n.DeletedAt, n.Samples, s.Capacity())
+		s.node(n.Info.Name).merge(n.Info, n.HasInfo, n.DeletedAt, s.slotted(n.Samples), s.Capacity())
 	}
+}
+
+// slotted returns samples moved to their Slot (a copy; the snapshot is not
+// modified). Two samples that land in one slot are deduplicated by
+// mergeSeries, the earlier one kept.
+func (s *Store) slotted(in []Sample) []Sample {
+	out := make([]Sample, len(in))
+	for i, x := range in {
+		out[i] = Sample{At: s.Slot(x.At), Usage: x.Usage}
+	}
+	return out
 }
 
 // merge folds one snapshot entry into e: metadata only where e has none,

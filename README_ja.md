@@ -57,6 +57,7 @@ linux / darwin / windows（amd64, arm64, armv7）のバイナリは [Releases](h
 | `--snapshot` (`KUBEGLANCE_SNAPSHOT`) | | 履歴を永続化する gzip JSON ファイル（任意） |
 | `--snapshot-every` (`KUBEGLANCE_SNAPSHOT_EVERY`) | `1m` | 書き出し間隔 |
 | `--shutdown-grace` (`KUBEGLANCE_SHUTDOWN_GRACE`) | `5s` | SIGTERM 後もこの時間は応答し、新レプリカのコピー完了を待つ |
+| `--bootstrap-timeout` (`KUBEGLANCE_BOOTSTRAP_TIMEOUT`) | `2m` | ピアはいるのに 1 つも応答しないとき、起動中のレプリカが履歴コピーを再試行する時間。その間は Ready にならない |
 | `--kubeconfig` | | クラスタ外用。未指定なら in-cluster → `$KUBECONFIG` → `~/.kube/config` |
 | `--log-level` (`KUBEGLANCE_LOG_LEVEL`) | `info` | `debug` / `info` / `warn` / `error`（stderr に JSON） |
 
@@ -98,9 +99,9 @@ UI が表示するものはすべて `/api/v1` 配下の JSON です。各エン
 metrics-server は瞬間値しか返さないので、ポーリングの空白はそのまま永遠の欠損です。kubeglance は DB なしでこれを避けます。
 
 1. `replicas: 2`、`RollingUpdate` で `maxUnavailable: 0`、`maxSurge: 1`。
-2. 新しい Pod は headless Service `<release>-peers` を解決し、他のレプリカから `/internal/snapshot` を取得してマージ。一度ポーリングしてから Ready になる。
+2. 新しい Pod は headless Service `<release>-peers`（Ready なレプリカだけを返す）を解決し、他のレプリカ全部から `/internal/snapshot` を取得してマージ。一度ポーリングしてから Ready になる。ピアがいるのに 1 つも応答しなければ、空の履歴のまま Ready にはならず、ピアを引き直して `--bootstrap-timeout` まで再試行する。その間も `/healthz` は応答するので再起動されない。
 3. それから古い Pod が終了。`preStopSleepSeconds` 待ち、SIGTERM 後も `--shutdown-grace` の間は応答し続けるので、進行中のコピーが完了する。
-4. 両レプリカは同じ metrics-server を叩くので、履歴は構造的に同一。リーダーも合意も不要。
+4. 両レプリカは同じ metrics-server を叩き、各サンプルはポーリングした瞬間ではなく、`--interval` の絶対時刻の刻み（15 秒なら `:00`, `:15`, `:30`, `:45`）に記録される。各レプリカは起動時刻に関係なく各刻みの中間でポーリングする。そのため 2 つのレプリカは同じ時刻を記録し、マージしても交互に重ならず重複が除かれる。リーダーも合意も不要。
 
 任意の `--snapshot` ファイル（chart の `snapshot.enabled`）は、全レプリカが同時に落ちた場合（クラスタ再起動）の保険です。更新を無停止にしているのはこれではなく、ピアコピーです。k3s のノードローカルストレージではそもそも無停止更新に使えません。
 

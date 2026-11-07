@@ -55,29 +55,11 @@ func run(ctx context.Context, c interfaces.Config, log *slog.Logger) error {
 	collector := services.NewCollector(store, k8s.NewMetricsSource(clients.Metrics), log)
 	query := services.NewQuery(store)
 
-	// 1. bootstrap history from peers, then disk
-	peers, err := peer.Discover(ctx, net.DefaultResolver, c.PeerHost, c.PeerPort, c.PodIP)
-	if err != nil {
-		log.Warn("peer discovery failed; starting without peer history", "err", err)
-	}
-	sources := make([]services.PeerSource, 0, len(peers))
-	for _, p := range peers {
-		sources = append(sources, p)
-	}
-	var disk services.SnapshotStore
-	if c.SnapshotPath != "" {
-		disk = snapshot.NewFile(c.SnapshotPath)
-	}
-	services.Bootstrap(ctx, store, sources, disk, log)
-
-	// 2. metadata (informers), then usage (poll loop)
-	if err := watcher.Run(ctx); err != nil {
-		return err
-	}
-	go collector.Run(ctx)
-	go services.NewPersister(store, disk, c.SnapshotEvery, log).Run(ctx)
-
-	// 3. serve
+	// 1. serve at once: /healthz answers, so the liveness probe does not
+	// restart a replica that is still waiting for a peer; /readyz stays
+	// false until the history is copied and the first round is recorded, and
+	// only Ready replicas are in the headless Service, so nobody copies from
+	// this one before then
 	srv := &http.Server{
 		Addr:              c.Addr,
 		Handler:           handler.New(handler.Deps{Store: store, Query: query, Collector: collector, Version: version.Version, Log: log}),
@@ -88,6 +70,31 @@ func run(ctx context.Context, c interfaces.Config, log *slog.Logger) error {
 		log.Info("listening", "addr", c.Addr)
 		errc <- srv.ListenAndServe()
 	}()
+
+	// 2. history from every peer (retried until --bootstrap-timeout while
+	// peers exist but none answers), then disk
+	var disk services.SnapshotStore
+	if c.SnapshotPath != "" {
+		disk = snapshot.NewFile(c.SnapshotPath)
+	}
+	findPeers := func(ctx context.Context) ([]services.PeerSource, error) {
+		peers, err := peer.Discover(ctx, net.DefaultResolver, c.PeerHost, c.PeerPort, c.PodIP)
+		sources := make([]services.PeerSource, 0, len(peers))
+		for _, p := range peers {
+			sources = append(sources, p)
+		}
+		return sources, err
+	}
+	services.Bootstrap(ctx, store, findPeers, disk, services.BootstrapPolicy{Timeout: c.BootstrapTimeout, Retry: 2 * time.Second}, log)
+
+	// 3. metadata (informers), then usage (poll loop)
+	if ctx.Err() == nil {
+		if err := watcher.Run(ctx); err != nil {
+			return err
+		}
+		go collector.Run(ctx)
+		go services.NewPersister(store, disk, c.SnapshotEvery, log).Run(ctx)
+	}
 
 	select {
 	case err := <-errc:

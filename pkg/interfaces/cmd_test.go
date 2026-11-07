@@ -41,7 +41,7 @@ func clearEnv(t *testing.T) {
 		"KUBEGLANCE_ADDR", "KUBEGLANCE_INTERVAL", "KUBEGLANCE_RETENTION",
 		"KUBEGLANCE_PEER_HOST", "KUBEGLANCE_PEER_PORT", "POD_IP",
 		"KUBEGLANCE_SNAPSHOT", "KUBEGLANCE_SNAPSHOT_EVERY",
-		"KUBEGLANCE_SHUTDOWN_GRACE", "KUBEGLANCE_LOG_LEVEL",
+		"KUBEGLANCE_SHUTDOWN_GRACE", "KUBEGLANCE_LOG_LEVEL", "KUBEGLANCE_BOOTSTRAP_TIMEOUT",
 	} {
 		t.Setenv(k, "")
 	}
@@ -54,13 +54,14 @@ func TestRootDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Config{
-		Addr:          ":8080",
-		Interval:      15 * time.Second,
-		Retention:     24 * time.Hour,
-		PeerPort:      8080,
-		SnapshotEvery: time.Minute,
-		ShutdownGrace: 5 * time.Second,
-		LogLevel:      "info",
+		Addr:             ":8080",
+		Interval:         15 * time.Second,
+		Retention:        24 * time.Hour,
+		PeerPort:         8080,
+		SnapshotEvery:    time.Minute,
+		ShutdownGrace:    5 * time.Second,
+		LogLevel:         "info",
+		BootstrapTimeout: 2 * time.Minute,
 	}
 	if c == nil || *c != want {
 		t.Fatalf("config = %+v, want %+v", c, want)
@@ -73,23 +74,24 @@ func TestRootFlags(t *testing.T) {
 		"--addr=127.0.0.1:9090", "--kubeconfig=/tmp/kc", "--interval=30s",
 		"--retention=2h", "--peer-host=peers.ns.svc", "--peer-port=9091",
 		"--pod-ip=10.0.0.7", "--snapshot=/data/s.snap", "--snapshot-every=5m",
-		"--shutdown-grace=7s", "--log-level=debug",
+		"--shutdown-grace=7s", "--log-level=debug", "--bootstrap-timeout=30s",
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := Config{
-		Addr:          "127.0.0.1:9090",
-		Kubeconfig:    "/tmp/kc",
-		Interval:      30 * time.Second,
-		Retention:     2 * time.Hour,
-		PeerHost:      "peers.ns.svc",
-		PeerPort:      9091,
-		PodIP:         "10.0.0.7",
-		SnapshotPath:  "/data/s.snap",
-		SnapshotEvery: 5 * time.Minute,
-		ShutdownGrace: 7 * time.Second,
-		LogLevel:      "debug",
+		Addr:             "127.0.0.1:9090",
+		Kubeconfig:       "/tmp/kc",
+		Interval:         30 * time.Second,
+		Retention:        2 * time.Hour,
+		PeerHost:         "peers.ns.svc",
+		PeerPort:         9091,
+		PodIP:            "10.0.0.7",
+		SnapshotPath:     "/data/s.snap",
+		SnapshotEvery:    5 * time.Minute,
+		ShutdownGrace:    7 * time.Second,
+		LogLevel:         "debug",
+		BootstrapTimeout: 30 * time.Second,
 	}
 	if c == nil || *c != want {
 		t.Fatalf("config = %+v, want %+v", c, want)
@@ -108,21 +110,23 @@ func TestRootEnv(t *testing.T) {
 	t.Setenv("KUBEGLANCE_SNAPSHOT_EVERY", "2m")
 	t.Setenv("KUBEGLANCE_SHUTDOWN_GRACE", "9s")
 	t.Setenv("KUBEGLANCE_LOG_LEVEL", "warn")
+	t.Setenv("KUBEGLANCE_BOOTSTRAP_TIMEOUT", "45s")
 	c, _, err := execute(t)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := Config{
-		Addr:          ":9000",
-		Interval:      30 * time.Second,
-		Retention:     6 * time.Hour,
-		PeerHost:      "peers",
-		PeerPort:      9001,
-		PodIP:         "10.1.2.3",
-		SnapshotPath:  "/s",
-		SnapshotEvery: 2 * time.Minute,
-		ShutdownGrace: 9 * time.Second,
-		LogLevel:      "warn",
+		Addr:             ":9000",
+		Interval:         30 * time.Second,
+		Retention:        6 * time.Hour,
+		PeerHost:         "peers",
+		PeerPort:         9001,
+		PodIP:            "10.1.2.3",
+		SnapshotPath:     "/s",
+		SnapshotEvery:    2 * time.Minute,
+		ShutdownGrace:    9 * time.Second,
+		LogLevel:         "warn",
+		BootstrapTimeout: 45 * time.Second,
 	}
 	if c == nil || *c != want {
 		t.Fatalf("config = %+v, want %+v", c, want)
@@ -229,7 +233,7 @@ func TestConfigLogsEveryEffectiveSetting(t *testing.T) {
 	want := map[string]any{
 		"addr": ":8080", "kubeconfig": "", "interval": "15s", "retention": "6h0m0s",
 		"peerHost": "kg-peers.ns.svc", "peerPort": float64(8080), "podIP": "",
-		"snapshot": "/data/s", "snapshotEvery": "1m0s", "shutdownGrace": "5s", "logLevel": "info",
+		"snapshot": "/data/s", "snapshotEvery": "1m0s", "shutdownGrace": "5s", "logLevel": "info", "bootstrapTimeout": "2m0s",
 	}
 	if len(line.Config) != len(want) {
 		t.Errorf("config has %d fields, want %d: %v", len(line.Config), len(want), line.Config)

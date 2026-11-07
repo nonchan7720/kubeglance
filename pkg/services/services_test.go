@@ -262,7 +262,7 @@ func TestBootstrapMergesPeerThenDiskAndSkipsFailures(t *testing.T) {
 
 	dst := domain.NewStore(15*time.Second, time.Minute)
 	n := Bootstrap(context.Background(), dst,
-		[]PeerSource{fakePeer{err: errors.New("down")}, fakePeer{snap: src.Snapshot()}}, disk, nil)
+		peersOnce([]PeerSource{fakePeer{err: errors.New("down")}, fakePeer{snap: src.Snapshot()}}), disk, fastRetry, nil)
 	if n != 2 {
 		t.Errorf("merged = %d, want 2", n)
 	}
@@ -281,6 +281,111 @@ func TestPersisterSavesOnShutdown(t *testing.T) {
 	p.Run(ctx)
 	if disk.saved != 1 {
 		t.Errorf("saved %d times, want 1 (final save)", disk.saved)
+	}
+}
+
+func TestNextPollIsMidSlotAndNeverSkipsOne(t *testing.T) {
+	const iv = 15 * time.Second
+	ms := func(sec float64) time.Time { return t0.Add(time.Duration(sec * float64(time.Second))) }
+	for _, c := range []struct {
+		name      string
+		last, now time.Time
+		want      time.Time
+	}{
+		{"nothing polled yet: now", time.Time{}, ms(3), ms(3)},
+		{"early in the next slot's wait: its middle", ms(0), ms(3), ms(22.5)},
+		{"just before the middle", ms(0), ms(20), ms(22.5)},
+		{"the middle passed (slow poll): now, still in slot +15", ms(0), ms(25), ms(25)},
+		{"slot +15 missed entirely, +30 past its middle: now", ms(0), ms(40), ms(40)},
+		{"slot +15 missed, early in +30: its middle", ms(0), ms(31), ms(37.5)},
+	} {
+		if got := nextPoll(c.last, c.now, iv); !got.Equal(c.want) {
+			t.Errorf("%s: nextPoll(%v, %v) = %v, want %v", c.name, c.last.Sub(t0), c.now.Sub(t0), got.Sub(t0), c.want.Sub(t0))
+		}
+	}
+}
+
+var fastRetry = BootstrapPolicy{Timeout: 200 * time.Millisecond, Retry: 5 * time.Millisecond}
+
+func peersOnce(p []PeerSource) PeerFinder {
+	return func(context.Context) ([]PeerSource, error) { return p, nil }
+}
+
+// flakyPeer fails its first `fails` fetches, then serves snap.
+type flakyPeer struct {
+	snap  domain.Snapshot
+	fails int
+	calls *int
+}
+
+func (f flakyPeer) Fetch(context.Context) (domain.Snapshot, error) {
+	*f.calls++
+	if *f.calls <= f.fails {
+		return domain.Snapshot{}, errors.New("connection refused")
+	}
+	return f.snap, nil
+}
+func (f flakyPeer) String() string { return "flaky" }
+
+func TestBootstrapRetriesUntilAPeerAnswers(t *testing.T) {
+	src := domain.NewStore(15*time.Second, time.Minute)
+	src.Record(domain.Round{At: at(0), Pods: map[domain.PodKey]domain.Resource{web1: {CPU: 7}}})
+	calls, finds := 0, 0
+	find := func(context.Context) ([]PeerSource, error) {
+		finds++
+		if finds == 1 {
+			return nil, errors.New("dns timeout") // discovery itself can fail too
+		}
+		return []PeerSource{flakyPeer{snap: src.Snapshot(), fails: 2, calls: &calls}}, nil
+	}
+	dst := domain.NewStore(15*time.Second, time.Minute)
+	if n := Bootstrap(context.Background(), dst, find, nil, fastRetry, nil); n != 1 {
+		t.Fatalf("merged = %d, want 1", n)
+	}
+	if calls != 3 || finds != 4 {
+		t.Errorf("fetches = %d (want 3), discoveries = %d (want 4: peers are looked up again each try)", calls, finds)
+	}
+	if len(dst.PodSamples(web1, time.Time{})) != 1 {
+		t.Error("history not copied")
+	}
+}
+
+func TestBootstrapGivesUpAfterTheTimeoutButStillLoadsDisk(t *testing.T) {
+	disk := &fakeDisk{}
+	_ = disk.Save(domain.NewStore(15*time.Second, time.Minute).Snapshot())
+	calls := 0
+	start := time.Now()
+	n := Bootstrap(context.Background(), domain.NewStore(15*time.Second, time.Minute),
+		peersOnce([]PeerSource{flakyPeer{fails: 1 << 30, calls: &calls}}), disk, fastRetry, nil)
+	if took := time.Since(start); took < fastRetry.Timeout || took > 5*fastRetry.Timeout {
+		t.Errorf("gave up after %v, want about %v", took, fastRetry.Timeout)
+	}
+	if n != 1 || calls < 2 {
+		t.Errorf("merged = %d (want 1: disk only), fetches = %d (want retries)", n, calls)
+	}
+}
+
+func TestBootstrapWithoutPeersDoesNotWait(t *testing.T) {
+	finds := 0
+	find := func(context.Context) ([]PeerSource, error) { finds++; return nil, nil }
+	start := time.Now()
+	if n := Bootstrap(context.Background(), domain.NewStore(15*time.Second, time.Minute), find, nil, fastRetry, nil); n != 0 {
+		t.Errorf("merged = %d", n)
+	}
+	if finds != 1 || time.Since(start) > fastRetry.Timeout/2 {
+		t.Errorf("first replica of an install waited: %d lookups in %v", finds, time.Since(start))
+	}
+}
+
+func TestBootstrapStopsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls := 0
+	start := time.Now()
+	Bootstrap(ctx, domain.NewStore(15*time.Second, time.Minute),
+		peersOnce([]PeerSource{flakyPeer{fails: 1 << 30, calls: &calls}}), nil, BootstrapPolicy{Timeout: time.Hour, Retry: time.Hour}, nil)
+	if time.Since(start) > time.Second {
+		t.Errorf("did not stop on cancel: %v", time.Since(start))
 	}
 }
 
