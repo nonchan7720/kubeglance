@@ -57,10 +57,8 @@ run = "go run ./internal/devserver"
 description = "gofmt + goimports via golangci-lint"
 run = "golangci-lint fmt ./..."
 
-[tasks.vet]
-run = "go vet ./..."
-
 [tasks.lint]
+# includes govet (see .golangci.yml), so there is no separate vet task
 run = "golangci-lint run ./..."
 
 [tasks.test]
@@ -74,7 +72,7 @@ run = ["helm lint charts/kubeglance", "helm template kubeglance charts/kubeglanc
 
 [tasks.ci]
 description = "Everything CI runs"
-depends = ["vet", "lint", "test", "helm:lint", "build"]
+depends = ["lint", "test", "helm:lint", "build"]
 
 # ---------------------------------------------------------------------------
 # depgraph (dependency analysis; Neo4j from compose.yaml)

@@ -113,7 +113,7 @@ internal/devserver   `mise run dev`: クラスタなしで合成データの UI 
 
 ```bash
 mise install         # Go, golangci-lint, helm, goreleaser（mise.toml で固定）
-mise run ci          # vet + lint + test + helm lint + build
+mise run ci          # lint (incl. govet) + test + helm lint + build
 mise run dev         # 合成データの UI を http://127.0.0.1:8080 で
 mise run run         # 現在の kubeconfig コンテキストに対して実行
 mise run depgraph:watch   # 依存グラフと Findings（Neo4j 用に Docker が必要）

@@ -34,7 +34,7 @@ Everything below builds, passes `go vet`, `golangci-lint run` (2.15.0, 0 issues)
 | `main.go` wiring, flags/env, graceful shutdown | `main.go` | done |
 | Synthetic-data dev server (`mise run dev`) | `internal/devserver/main.go` | done |
 | Helm chart (Deployment w/ RollingUpdate + preStop sleep, Service + headless `-peers`, RBAC read-only, optional PVC, Ingress) | `charts/kubeglance` | done, lints and renders |
-| CI (`ci.yaml`: vet/lint/test/helm/build + `depgraph` job on compose Neo4j), `check-pull-request-title.yaml` (status check `pr-title`), `auto-approve.yaml` (owner + Renovate patch PRs), `release.yaml` (release-please with a GitHub App token → goreleaser stable / `-dev.<sha>` prerelease → ghcr images + OCI chart) — all in the shape of nonchan7720/manifold | `.github/workflows/*.yaml`, `release-please/` | written; needs the `RELEASE_PLEASE_*` secrets, see TODO |
+| CI (`ci.yaml`: parallel jobs `ci` = golangci-lint-action + test + build, `helm`, `depgraph` on compose Neo4j), `check-pull-request-title.yaml` (status check `pr-title`), `auto-approve.yaml` (owner + Renovate patch PRs), `release.yaml` (release-please with a GitHub App token → goreleaser stable / `-dev.<sha>` prerelease → ghcr images + OCI chart) — all in the shape of nonchan7720/manifold | `.github/workflows/*.yaml`, `release-please/` | written; needs the `RELEASE_PLEASE_*` secrets, see TODO |
 | README (en/ja) | `README.md`, `README_ja.md` | written |
 
 **Not yet done**: see [TODO.md](TODO.md). The most important gap is that nothing has been run against a real cluster.
