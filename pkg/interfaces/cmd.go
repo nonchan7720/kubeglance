@@ -43,7 +43,7 @@ func (c Config) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("addr", c.Addr),
 		slog.String("kubeconfig", c.Kubeconfig),
-		slog.String("interval", c.Interval.String()),
+		slog.String("interval", intervalString(c.Interval)),
 		slog.String("retention", c.Retention.String()),
 		slog.String("peerHost", c.PeerHost),
 		slog.Int("peerPort", c.PeerPort),
@@ -54,6 +54,14 @@ func (c Config) LogValue() slog.Value {
 		slog.String("logLevel", c.LogLevel),
 		slog.String("bootstrapTimeout", c.BootstrapTimeout.String()),
 	)
+}
+
+// intervalString is "auto" for 0 (follow metrics-server), else the duration.
+func intervalString(d time.Duration) string {
+	if d == 0 {
+		return "auto"
+	}
+	return d.String()
 }
 
 // RunFunc starts kubeglance with a parsed Config. It lives in main, which
@@ -70,7 +78,7 @@ func NewRootCommand(run RunFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "kubeglance",
 		Short: "See what is eating your cluster, from your phone",
-		Long: `kubeglance polls metrics-server every 15 s, keeps a bounded in-memory
+		Long: `kubeglance polls metrics-server at its own resolution, keeps a bounded in-memory
 history, and serves a mobile-first UI and a JSON API with cluster / node /
 workload / pod usage as now, average, median and p95 over a window.
 
@@ -100,7 +108,7 @@ a flag on the command line wins over the variable.`,
 	f.SortFlags = false
 	f.StringVar(&c.Addr, "addr", ":8080", "listen address")
 	f.StringVar(&c.Kubeconfig, "kubeconfig", "", "kubeconfig path (default: in-cluster, then $KUBECONFIG, then ~/.kube/config)")
-	f.DurationVar(&c.Interval, "interval", 15*time.Second, "poll interval; metrics-server refreshes every 15s, shorter is pointless")
+	f.DurationVar(&c.Interval, "interval", 0, "poll interval; 0 follows metrics-server's --metric-resolution, also when it changes while running (15s until it is known); a value fixes it")
 	f.DurationVar(&c.Retention, "retention", 24*time.Hour, "how much history to keep in memory")
 	f.StringVar(&c.PeerHost, "peer-host", "", "headless Service name of the replicas; empty disables peer bootstrap")
 	f.IntVar(&c.PeerPort, "peer-port", 8080, "port peers serve on")

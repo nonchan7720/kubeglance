@@ -72,4 +72,7 @@ type Round struct {
 	Pods       map[PodKey]Resource
 	Nodes      map[string]Resource
 	Containers map[PodKey]map[string]Resource
+	// Resolution is how often the source refreshes, as it reported in this
+	// round (metrics-server's --metric-resolution); 0 when unknown.
+	Resolution time.Duration
 }

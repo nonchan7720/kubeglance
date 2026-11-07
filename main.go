@@ -1,6 +1,6 @@
 // kubeglance: see what is eating your cluster, from your phone.
 //
-// One static binary. It polls metrics-server every 15 s, keeps a bounded
+// One static binary. It polls metrics-server at its own resolution, keeps a bounded
 // in-memory history, and serves a mobile-first UI and a JSON API with
 // cluster / node / workload / pod usage as now, average, median and p95
 // over a window. With two replicas, a starting replica copies the history
@@ -41,18 +41,27 @@ func main() {
 func run(ctx context.Context, c interfaces.Config, log *slog.Logger) error {
 	log.Info("starting", "version", version.Version, "config", c)
 
-	store := domain.NewStore(c.Interval, c.Retention)
-	log.Info("history sized", "samplesPerEntity", store.Capacity())
-
 	clients, err := k8s.NewClients(c.Kubeconfig)
 	if err != nil {
 		return err
 	}
+	metrics := k8s.NewMetricsSource(clients.Metrics)
+
+	// poll exactly at metrics-server's resolution unless --interval says
+	// otherwise: faster reads every value twice, slower misses values. The
+	// start-up guess only has to be close: in auto mode the collector follows
+	// the resolution every round reports, also when it changes later
+	interval := services.ResolveInterval(ctx, c.Interval, metrics.Resolution,
+		services.IntervalPolicy{Timeout: 20 * time.Second, Retry: 5 * time.Second, Fallback: 15 * time.Second}, log)
+	store := domain.NewStore(interval, c.Retention)
+	log.Info("history sized", "interval", interval, "samplesPerEntity", store.Capacity())
+
 	watcher, err := k8s.NewWatcher(clients.Core, store, log)
 	if err != nil {
 		return err
 	}
-	collector := services.NewCollector(store, k8s.NewMetricsSource(clients.Metrics), log)
+	collector := services.NewCollector(store, metrics, log)
+	collector.FollowResolution(c.Interval == 0)
 	query := services.NewQuery(store)
 
 	// 1. serve at once: /healthz answers, so the liveness probe does not

@@ -389,6 +389,112 @@ func TestBootstrapStopsOnCancel(t *testing.T) {
 	}
 }
 
+func TestResolveInterval(t *testing.T) {
+	detect := func(d time.Duration, err error, calls *int) func(context.Context) (time.Duration, error) {
+		return func(context.Context) (time.Duration, error) { *calls++; return d, err }
+	}
+	pol := IntervalPolicy{Timeout: 50 * time.Millisecond, Retry: 5 * time.Millisecond, Fallback: 15 * time.Second}
+	ctx := context.Background()
+	var calls int
+
+	calls = 0
+	if got := ResolveInterval(ctx, 30*time.Second, detect(10*time.Second, nil, &calls), pol, nil); got != 30*time.Second || calls != 0 {
+		t.Errorf("configured: %v after %d detections, want 30s without detecting", got, calls)
+	}
+	calls = 0
+	if got := ResolveInterval(ctx, 0, detect(10*time.Second, nil, &calls), pol, nil); got != 10*time.Second || calls != 1 {
+		t.Errorf("detected: %v after %d detections, want 10s after 1", got, calls)
+	}
+	// metrics-server answers only after it scraped twice: retried, then fallback
+	calls = 0
+	if got := ResolveInterval(ctx, 0, detect(0, errors.New("no metrics yet"), &calls), pol, nil); got != 15*time.Second || calls < 2 {
+		t.Errorf("undetectable: %v after %d detections, want the 15s fallback after retries", got, calls)
+	}
+	// metrics-server refuses a resolution below 10 s; anything outside
+	// [10s, 5m] is not its resolution, so it is not trusted
+	for _, bogus := range []time.Duration{3 * time.Second, 20 * time.Minute} {
+		calls = 0
+		if got := ResolveInterval(ctx, 0, detect(bogus, nil, &calls), pol, nil); got != 15*time.Second {
+			t.Errorf("detected %v: got %v, want the fallback", bogus, got)
+		}
+	}
+}
+
+func TestCollectorFollowsAResolutionChange(t *testing.T) {
+	const ten, fifteen = 10 * time.Second, 15 * time.Second
+	round := func(sec int, res time.Duration) domain.Round {
+		return domain.Round{At: at(sec), Resolution: res, Pods: map[domain.PodKey]domain.Resource{web1: {CPU: 1}}}
+	}
+	run := func(follow bool, rounds ...domain.Round) *domain.Store {
+		s := domain.NewStore(fifteen, time.Hour)
+		c := NewCollector(s, &fakeSource{rounds: rounds}, nil)
+		c.FollowResolution(follow)
+		for range rounds {
+			c.PollOnce(context.Background())
+		}
+		return s
+	}
+
+	// three rounds in a row report 10 s: switch, on the 10 s grid after the
+	// last recorded slot (+30)
+	s := run(true, round(0, ten), round(15, ten), round(30, ten))
+	if s.Interval() != ten {
+		t.Fatalf("interval = %v, want 10s", s.Interval())
+	}
+	if tl := s.Timeline(); !tl[len(tl)-1].Since.Equal(at(40)) {
+		t.Errorf("timeline = %v, want the change at +40", tl)
+	}
+	// two are not enough (one slow scrape, a restarting metrics-server)
+	if got := run(true, round(0, ten), round(15, ten), round(30, fifteen)).Interval(); got != fifteen {
+		t.Errorf("after 2 rounds: %v", got)
+	}
+	// nor alternating values
+	if got := run(true, round(0, ten), round(15, fifteen), round(30, ten), round(45, fifteen)).Interval(); got != fifteen {
+		t.Errorf("alternating: %v", got)
+	}
+	// metrics-server cannot report less than 10 s; a bogus value is ignored
+	if got := run(true, round(0, 3*time.Second), round(15, 3*time.Second), round(30, 3*time.Second)).Interval(); got != fifteen {
+		t.Errorf("bogus resolution followed: %v", got)
+	}
+	// --interval set by hand: never follow
+	if got := run(false, round(0, ten), round(15, ten), round(30, ten)).Interval(); got != fifteen {
+		t.Errorf("manual interval changed: %v", got)
+	}
+}
+
+func TestNextPollAfterTheGridChanged(t *testing.T) {
+	// the last poll was in the 15 s slot +45; the interval is now 10 s and
+	// the new grid starts at +50: wait for the middle of +50, not +55+5
+	ms := func(sec float64) time.Time { return t0.Add(time.Duration(sec * float64(time.Second))) }
+	if got := nextPoll(ms(45), ms(52.6), 10*time.Second); !got.Equal(ms(55)) {
+		t.Errorf("nextPoll = %v, want +55s", got.Sub(t0))
+	}
+	// 10 s → 30 s: last slot +50, next 30 s slot +60, its middle +75
+	if got := nextPoll(ms(50), ms(55), 30*time.Second); !got.Equal(ms(75)) {
+		t.Errorf("nextPoll = %v, want +75s", got.Sub(t0))
+	}
+}
+
+func TestQueryCoverageAcrossAResolutionChange(t *testing.T) {
+	s := domain.NewStore(15*time.Second, time.Hour)
+	s.UpsertNodes([]domain.NodeInfo{{Name: "n1", Ready: true}})
+	for _, sec := range []int{0, 15, 30, 45} {
+		s.Record(domain.Round{At: at(sec), Nodes: map[string]domain.Resource{"n1": {CPU: 1}}})
+	}
+	s.SetInterval(10*time.Second, at(45)) // 10 s grid from +50
+	for _, sec := range []int{50, 60, 70, 80, 90, 100} {
+		s.Record(domain.Round{At: at(sec), Nodes: map[string]domain.Resource{"n1": {CPU: 1}}})
+	}
+	q := NewQuery(s)
+	q.now = func() time.Time { return at(100) }
+	// window +0..+100 at 15 s then 10 s: 0, 15, 30, 45 and 50..100 = 10
+	// samples, all present; counting the window at 10 s would say 10/11
+	u := q.Cluster(100 * time.Second).Usage
+	if u.Samples != 10 || u.Expected != 10 || u.Coverage != 1 {
+		t.Errorf("usage samples %d expected %d coverage %v, want 10, 10, 1", u.Samples, u.Expected, u.Coverage)
+	}
+}
+
 func TestPodDetailBreaksDownContainers(t *testing.T) {
 	s := domain.NewStore(15*time.Second, time.Hour)
 	multi := domain.PodKey{Namespace: "app", Name: "web-1"}

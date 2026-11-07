@@ -55,7 +55,7 @@ func TestRootDefaults(t *testing.T) {
 	}
 	want := Config{
 		Addr:             ":8080",
-		Interval:         15 * time.Second,
+		Interval:         0, // auto: follow metrics-server's resolution
 		Retention:        24 * time.Hour,
 		PeerPort:         8080,
 		SnapshotEvery:    time.Minute,
@@ -231,7 +231,7 @@ func TestConfigLogsEveryEffectiveSetting(t *testing.T) {
 		t.Fatalf("%v: %s", err, buf.String())
 	}
 	want := map[string]any{
-		"addr": ":8080", "kubeconfig": "", "interval": "15s", "retention": "6h0m0s",
+		"addr": ":8080", "kubeconfig": "", "interval": "auto", "retention": "6h0m0s",
 		"peerHost": "kg-peers.ns.svc", "peerPort": float64(8080), "podIP": "",
 		"snapshot": "/data/s", "snapshotEvery": "1m0s", "shutdownGrace": "5s", "logLevel": "info", "bootstrapTimeout": "2m0s",
 	}
@@ -250,5 +250,11 @@ func TestConfigLogsEveryEffectiveSetting(t *testing.T) {
 func TestConfigLogValueCoversEveryField(t *testing.T) {
 	if got, want := len(Config{}.LogValue().Group()), reflect.TypeFor[Config]().NumField(); got != want {
 		t.Errorf("LogValue has %d attributes, Config has %d fields", got, want)
+	}
+}
+
+func TestConfigLogsAFixedInterval(t *testing.T) {
+	if got := intervalString(30 * time.Second); got != "30s" {
+		t.Errorf("intervalString(30s) = %q", got)
 	}
 }

@@ -49,7 +49,7 @@ Flags, or the environment variable in brackets; a flag on the command line wins 
 | flag | default | meaning |
 |---|---|---|
 | `--addr` (`KUBEGLANCE_ADDR`) | `:8080` | listen address |
-| `--interval` (`KUBEGLANCE_INTERVAL`) | `15s` | poll interval. metrics-server refreshes every 15 s; shorter reads the same numbers twice |
+| `--interval` (`KUBEGLANCE_INTERVAL`) | auto | poll interval. By default it follows metrics-server's `--metric-resolution`, read from the `window` metrics-server reports in every poll (15 s on k3s; managed clusters may use another value). A change is followed without a restart once three polls in a row report it; until the first value is known it is 15 s. Statistics over a window that spans a change count each part at its own interval. Polling faster than the resolution reads the same numbers twice; set this only to fix the interval, which then never changes |
 | `--retention` (`KUBEGLANCE_RETENTION`) | `24h` | history kept in memory; the maximum window |
 | `--peer-host` (`KUBEGLANCE_PEER_HOST`) | | headless Service of the replicas; empty disables the peer copy |
 | `--peer-port` (`KUBEGLANCE_PEER_PORT`) | `8080` | port peers serve on |

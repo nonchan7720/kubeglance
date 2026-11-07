@@ -128,3 +128,24 @@ func TestSparklineEmpty(t *testing.T) {
 		t.Errorf("zero window = %+v", sp)
 	}
 }
+
+func TestSparklineBucketsFitTheCoarsestIntervalInTheWindow(t *testing.T) {
+	// 15 s until +300, 30 s after: 30 s buckets (2 × 15 s) would each hold
+	// at most one 30 s sample and show a gap for one late round; the bucket
+	// follows the coarsest interval in the window: 2 × 30 s
+	tl := Timeline{{Step: 15 * time.Second}, {Since: at(300), Step: 30 * time.Second}}
+	sp := Sparkline(nil, Window{From: at(0), To: at(600), Step: 30 * time.Second, Timeline: tl}, 60)
+	if sp.Bucket != time.Minute {
+		t.Errorf("bucket = %v, want 1m", sp.Bucket)
+	}
+	// a window entirely after the change: the same
+	sp = Sparkline(nil, Window{From: at(300), To: at(600), Step: 30 * time.Second, Timeline: tl}, 60)
+	if sp.Bucket != time.Minute {
+		t.Errorf("bucket after the change = %v, want 1m", sp.Bucket)
+	}
+	// entirely before it: 2 × 15 s
+	sp = Sparkline(nil, Window{From: at(0), To: at(240), Step: 30 * time.Second, Timeline: tl}, 60)
+	if sp.Bucket != 30*time.Second {
+		t.Errorf("bucket before the change = %v, want 30s", sp.Bucket)
+	}
+}

@@ -42,7 +42,9 @@ func (q *Query) window(d time.Duration) (domain.Window, WindowInfo) {
 		d = q.store.Retention()
 	}
 	to := q.now()
-	w := domain.Window{From: to.Add(-d), To: to, Step: q.store.Interval()}
+	// the timeline, so a window spanning a change of metrics-server's
+	// resolution expects each part's samples at its own step
+	w := domain.Window{From: to.Add(-d), To: to, Step: q.store.Interval(), Timeline: q.store.Timeline()}
 	return w, WindowInfo{From: w.From, To: w.To, Duration: d, Step: w.Step}
 }
 

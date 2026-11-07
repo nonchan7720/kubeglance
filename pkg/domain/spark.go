@@ -22,7 +22,8 @@ type Spark struct {
 }
 
 // Sparkline buckets samples (oldest first) over w into at most about
-// maxPoints buckets. A bucket is at least two sampling steps wide, so a
+// maxPoints buckets. A bucket is at least two sampling steps wide (of the
+// coarsest interval in the window, when it has a Timeline), so a
 // single late poll round does not show as a gap; Stats.Coverage reports
 // those. The partial bucket before the first clock boundary is left out (it
 // would hold fewer samples than the others), and so is the bucket holding
@@ -33,7 +34,13 @@ func Sparkline(in []Sample, w Window, maxPoints int) Spark {
 		return Spark{CPU: []*int64{}, Memory: []*int64{}}
 	}
 	d := w.To.Sub(w.From)
-	bucket := max(2*w.Step, roundUp(d/time.Duration(maxPoints), w.Step))
+	// the coarsest interval in the window: across a change of the interval
+	// a bucket must hold two samples of the slower part too
+	step := w.Step
+	if len(w.Timeline) > 0 {
+		step = w.Timeline.Coarsest(w.From, w.To)
+	}
+	bucket := max(2*step, roundUp(d/time.Duration(maxPoints), step))
 
 	first := ceilDiv(w.From.UnixNano(), int64(bucket))
 	last := floorDiv(w.To.UnixNano(), int64(bucket))

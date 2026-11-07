@@ -23,6 +23,25 @@ type Collector struct {
 	lastSuccess time.Time
 	lastError   error
 	rounds      int
+
+	// following metrics-server's resolution (off when --interval is set)
+	follow    bool
+	candidate time.Duration // a new resolution seen in `seen` rounds in a row
+	seen      int
+}
+
+// roundsToSwitch is how many rounds in a row must report a new resolution
+// before the interval follows it: one slow scrape or a restarting
+// metrics-server must not move the grid.
+const roundsToSwitch = 3
+
+// FollowResolution makes the collector change the store's interval, without
+// a restart, when the rounds report that metrics-server's resolution
+// changed. Off when the interval was set by hand.
+func (c *Collector) FollowResolution(on bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.follow = on
 }
 
 // NewCollector wires a source to a store.
@@ -66,7 +85,8 @@ func nextPoll(last, now time.Time, interval time.Duration) time.Time {
 	if last.IsZero() {
 		return now
 	}
-	slot := last.Add(interval)
+	// on the current grid even right after the interval changed
+	slot := last.Add(interval).Truncate(interval)
 	if cur := now.Truncate(interval); cur.After(slot) {
 		slot = cur // the slot after last is gone; poll the current one
 	}
@@ -95,7 +115,29 @@ func (c *Collector) PollOnce(ctx context.Context) {
 	c.store.Record(round)
 	c.lastSuccess, c.lastError = round.At, nil
 	c.rounds++
+	c.followLocked(round)
 	c.log.Debug("poll recorded", "at", round.At, "pods", len(round.Pods), "nodes", len(round.Nodes))
+}
+
+// followLocked counts rounds that report a resolution other than the
+// interval and switches after roundsToSwitch of them in a row.
+func (c *Collector) followLocked(round domain.Round) {
+	r := round.Resolution
+	if !c.follow || r < minResolution || r > maxResolution || r == c.store.Interval() {
+		c.candidate, c.seen = 0, 0
+		return
+	}
+	if r != c.candidate {
+		c.candidate, c.seen = r, 0
+	}
+	c.seen++
+	if c.seen < roundsToSwitch {
+		return
+	}
+	from := c.store.Interval()
+	c.store.SetInterval(r, c.store.Slot(round.At))
+	c.candidate, c.seen = 0, 0
+	c.log.Info("metrics-server resolution changed; poll interval follows", "from", from, "to", r)
 }
 
 // Health describes the collector for readiness and the UI.

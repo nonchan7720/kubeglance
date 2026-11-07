@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -42,12 +43,48 @@ func (m *MetricsSource) Poll(ctx context.Context) (domain.Round, error) {
 	return convertRound(start, nodes, pods), nil
 }
 
+// Resolution is metrics-server's --metric-resolution as the nodes report
+// it: metrics-server sets each NodeMetrics' Window to the time between the
+// two kubelet scrapes the usage was computed from, which is its resolution
+// plus scrape jitter (a missed scrape doubles one node's window). The median
+// over the nodes, rounded to the second, is the resolution. One list call;
+// it reads what metrics-server holds in memory and adds no kubelet load.
+func (m *MetricsSource) Resolution(ctx context.Context) (time.Duration, error) {
+	nodes, err := m.client.MetricsV1beta1().NodeMetricses().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("list node metrics: %w", err)
+	}
+	r := resolution(nodes)
+	if r == 0 {
+		return 0, fmt.Errorf("no node metrics with a window yet")
+	}
+	return r, nil
+}
+
+// resolution is the median node Window rounded to the second, 0 when no
+// node reports one. Every poll carries it (Round.Resolution), so following a
+// change of metrics-server's resolution costs no extra call.
+func resolution(nodes *metricsv1beta1.NodeMetricsList) time.Duration {
+	var windows []time.Duration
+	for _, n := range nodes.Items {
+		if w := n.Window.Duration; w > 0 {
+			windows = append(windows, w)
+		}
+	}
+	if len(windows) == 0 {
+		return 0
+	}
+	slices.Sort(windows)
+	return windows[len(windows)/2].Round(time.Second)
+}
+
 func convertRound(at time.Time, nodes *metricsv1beta1.NodeMetricsList, pods *metricsv1beta1.PodMetricsList) domain.Round {
 	r := domain.Round{
 		At:         at.Truncate(time.Second),
 		Pods:       make(map[domain.PodKey]domain.Resource, len(pods.Items)),
 		Nodes:      make(map[string]domain.Resource, len(nodes.Items)),
 		Containers: map[domain.PodKey]map[string]domain.Resource{},
+		Resolution: resolution(nodes),
 	}
 	for _, n := range nodes.Items {
 		r.Nodes[n.Name] = toResource(n.Usage)

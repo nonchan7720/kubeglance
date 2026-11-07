@@ -13,6 +13,9 @@ type Window struct {
 	From time.Time
 	To   time.Time
 	Step time.Duration
+	// Timeline, when set, replaces Step for Expected: a window that spans a
+	// change of the interval counts each part at its own step.
+	Timeline Timeline
 }
 
 // Stats summarizes the samples of one entity (or an aggregate) in a window.
@@ -35,11 +38,14 @@ type Stats struct {
 // (Series.Since), this function only describes it.
 func ComputeStats(in []Sample, w Window) Stats {
 	st := Stats{Samples: len(in)}
-	if w.Step > 0 && w.To.After(w.From) {
+	switch {
+	case len(w.Timeline) > 0 && w.To.After(w.From):
+		st.Expected = w.Timeline.Expected(w.From, w.To)
+	case w.Step > 0 && w.To.After(w.From):
 		st.Expected = int(w.To.Sub(w.From)/w.Step) + 1
-		if st.Expected > 0 {
-			st.Coverage = min(1, float64(len(in))/float64(st.Expected))
-		}
+	}
+	if st.Expected > 0 {
+		st.Coverage = min(1, float64(len(in))/float64(st.Expected))
 	}
 	if len(in) == 0 {
 		return st

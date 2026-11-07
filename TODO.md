@@ -40,6 +40,8 @@ A Claude Code cloud container cannot do this part: `dockerd` starts and the k3s 
 - [x] NetworkPolicy template (ingress from the replicas + `networkPolicy.ingressFrom`; egress to DNS, the API server and the replicas). Off by default. `charts/tests/render.sh` checks the renders; it has not been applied to a real CNI yet, see §0.
 - [x] Structured startup log line that prints the effective config (`starting` → `config`; a test fails when a `Config` field is not logged).
 
+- [x] Poll interval follows metrics-server's `--metric-resolution` (read from the `window` every poll reports), also when it changes while kubeglance runs, so managed clusters with another resolution are polled at theirs. `--interval` fixes it.
+
 ## 4. Toward the CNCF Landscape
 
 Entry criteria (checked 2026-11): ~300 GitHub stars, fits an existing category (*Observability and Analysis → Monitoring*), SVG logo, active commits (removed after 3 months idle). The PR goes to `cncf/landscape` (`landscape.yml` + `hosted_logos/kubeglance.svg`).
