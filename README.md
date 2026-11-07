@@ -66,6 +66,7 @@ Everything the UI shows is JSON under `/api/v1`, with `?window=30m` (default) on
 | `GET /api/v1/nodes` | per node: usage stats, ratio of allocatable, pods and requests scheduled; plus the imbalance (spread, stddev) across nodes |
 | `GET /api/v1/workloads?namespace=` | per controller: pods, requests, limits, summed usage stats, per-pod usage, usage/request ratio |
 | `GET /api/v1/pods?namespace=&node=&workload=ns/Kind/name` | per pod: usage stats, usage/limit and usage/request ratios; pods gone during the window are included and flagged |
+| `GET /api/v1/pods/{namespace}/{name}` | one pod and each of its containers (spec order): usage stats against the container's own requests and limits; 404 when the pod is not in history |
 | `GET /api/v1/status` | version, interval, retention, collector health |
 | `GET /healthz`, `GET /readyz` | liveness; readiness once the first round is collected |
 | `GET /internal/snapshot` | the whole history (what peers copy) |
@@ -84,7 +85,9 @@ A sample is 16 bytes (CPU millicores + memory bytes; the timestamp is shared by 
 | 100 | ~9 MB |
 | 300 | ~28 MB |
 
-plus the Go runtime, the HTTP server and the client-go caches (10–20 MB). The chart requests 64 Mi and limits 128 Mi, which fits a Raspberry Pi k3s. Lower `--retention` to shrink it; the window selector is capped to the retention.
+A pod with more than one container keeps one more series per container for the Pod screen's breakdown (a single-container pod's series already is its container's), so a pod with one sidecar costs three series instead of one.
+
+On top of that come the Go runtime, the HTTP server and the client-go caches (10–20 MB). The chart requests 64 Mi and limits 128 Mi, which fits a Raspberry Pi k3s. Lower `--retention` to shrink it; the window selector is capped to the retention.
 
 ## How updates keep the history
 

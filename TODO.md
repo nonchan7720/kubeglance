@@ -26,7 +26,7 @@ A Claude Code cloud container cannot do this part: `dockerd` starts and the k3s 
 - [x] **Sparkline per row**: the numbers exist (`Series`); a tiny inline SVG of the window per bar makes "has it been like this for 30 min" visible at a glance. Keep it dependency-free.
 - [x] **Namespace filter** in the Workloads / Pods tabs. Done client-side: the API already returns every row, so the namespace list stays complete without another request.
 - [x] **Sort toggle** (CPU / memory / name) on Nodes, Workloads, Pods. Nodes sort by ratio of allocatable, workloads and pods by usage now.
-- [ ] **Container-level breakdown** on the Pod screen (metrics-server returns per-container usage; `convertRound` currently sums it).
+- [x] **Container-level breakdown** on the Pod screen: tap a pod for its containers (`GET /api/v1/pods/{namespace}/{name}`). Per-container series are kept for multi-container pods only.
 - [ ] **Downsampling for long retention**: raw 15 s for the last hour, 1-min means beyond, so `--retention=7d` stays small. Design note: stats over a downsampled range must be labelled as such (`coverage` already exists; add `resolution`).
 - [x] **Gap rendering**: empty sparkline buckets are shaded, never bridged.
 - [x] **Light theme polish**: checked at 375 px in light and dark, en and ja (avg marker colour, ja tab labels, stats row wrapping, `[hidden]` vs `display: flex`).

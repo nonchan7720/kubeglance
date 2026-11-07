@@ -174,8 +174,10 @@ func (w *Watcher) podInfo(p *corev1.Pod) domain.PodInfo {
 	}
 	limitless := false
 	for _, c := range p.Spec.Containers {
-		info.Requests = info.Requests.Add(toResource(c.Resources.Requests))
+		req := toResource(c.Resources.Requests)
+		info.Requests = info.Requests.Add(req)
 		lim := toResource(c.Resources.Limits)
+		info.Containers = append(info.Containers, domain.ContainerInfo{Name: c.Name, Requests: req, Limits: lim})
 		if lim.CPU == 0 || lim.Memory == 0 {
 			limitless = true
 		}

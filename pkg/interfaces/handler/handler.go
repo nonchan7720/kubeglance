@@ -37,6 +37,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/nodes", h.nodes)
 	mux.HandleFunc("GET /api/v1/workloads", h.workloads)
 	mux.HandleFunc("GET /api/v1/pods", h.pods)
+	mux.HandleFunc("GET /api/v1/pods/{namespace}/{name}", h.pod)
 	mux.HandleFunc("GET /api/v1/status", h.status)
 	mux.HandleFunc("GET /internal/snapshot", h.snapshot)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -128,6 +129,16 @@ func (h *handler) pods(w http.ResponseWriter, r *http.Request) {
 		f.Workload = &domain.WorkloadKey{Namespace: parts[0], Kind: parts[1], Name: parts[2]}
 	}
 	h.writeJSON(w, r, h.Query.Pods(window(r), f))
+}
+
+func (h *handler) pod(w http.ResponseWriter, r *http.Request) {
+	key := domain.PodKey{Namespace: r.PathValue("namespace"), Name: r.PathValue("name")}
+	v, ok := h.Query.Pod(window(r), key)
+	if !ok {
+		http.Error(w, "pod not in history", http.StatusNotFound)
+		return
+	}
+	h.writeJSON(w, r, v)
 }
 
 // Status is what the UI shows in its header.

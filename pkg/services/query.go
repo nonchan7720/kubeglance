@@ -2,6 +2,7 @@ package services
 
 import (
 	"cmp"
+	"maps"
 	"slices"
 	"time"
 
@@ -277,21 +278,81 @@ func (q *Query) Pods(d time.Duration, f PodFilter) PodsView {
 		if f.Workload != nil && workloadOf(p) != *f.Workload {
 			continue
 		}
-		pv := PodView{PodInfo: p, Deleted: q.store.PodDeleted(p.Key)}
-		samples := q.store.PodSamples(p.Key, w.From)
-		pv.Usage = domain.ComputeStats(samples, w)
+		pv := q.podView(p, w)
 		if pv.Deleted && pv.Usage.Samples == 0 {
 			continue
 		}
-		pv.Spark = domain.Sparkline(samples, w, sparkPoints)
-		pv.LimitRatio = ratio{domain.Ratio(pv.Usage.Now.CPU, p.Limits.CPU), domain.Ratio(pv.Usage.Now.Memory, p.Limits.Memory)}
-		pv.RequestRatio = ratio{domain.Ratio(pv.Usage.Now.CPU, p.Requests.CPU), domain.Ratio(pv.Usage.Now.Memory, p.Requests.Memory)}
 		v.Pods = append(v.Pods, pv)
 	}
 	slices.SortFunc(v.Pods, func(a, b PodView) int {
 		return cmp.Or(cmp.Compare(b.Usage.Now.CPU, a.Usage.Now.CPU), cmp.Compare(a.Key.String(), b.Key.String()))
 	})
 	return v
+}
+
+func (q *Query) podView(p domain.PodInfo, w domain.Window) PodView {
+	pv := PodView{PodInfo: p, Deleted: q.store.PodDeleted(p.Key)}
+	pv.Usage, pv.Spark = statsAndSpark(q.store.PodSamples(p.Key, w.From), w)
+	pv.LimitRatio = ratioOf(pv.Usage.Now, p.Limits)
+	pv.RequestRatio = ratioOf(pv.Usage.Now, p.Requests)
+	return pv
+}
+
+func statsAndSpark(samples []domain.Sample, w domain.Window) (domain.Stats, domain.Spark) {
+	return domain.ComputeStats(samples, w), domain.Sparkline(samples, w, sparkPoints)
+}
+
+func ratioOf(used, total domain.Resource) ratio {
+	return ratio{domain.Ratio(used.CPU, total.CPU), domain.Ratio(used.Memory, total.Memory)}
+}
+
+// ContainerView is one container of a pod, against its own requests and
+// limits.
+type ContainerView struct {
+	domain.ContainerInfo
+	Usage        domain.Stats `json:"usage"`
+	Spark        domain.Spark `json:"spark"`
+	LimitRatio   ratio        `json:"limitRatio"`   // usage now / limits (0 when unlimited)
+	RequestRatio ratio        `json:"requestRatio"` // usage now / requests
+}
+
+// PodDetailView answers "which container in this pod is it?".
+type PodDetailView struct {
+	Window     WindowInfo      `json:"window"`
+	Pod        PodView         `json:"pod"`
+	Containers []ContainerView `json:"containers"`
+}
+
+// Pod computes one pod with its containers, in spec order; a container that
+// has samples but is not in the spec (metadata not seen yet) follows, by
+// name. A single-container pod's container is the pod's own series. False
+// when the pod is not in history.
+func (q *Query) Pod(d time.Duration, k domain.PodKey) (PodDetailView, bool) {
+	info, ok := q.store.Pod(k)
+	if !ok {
+		return PodDetailView{}, false
+	}
+	w, winfo := q.window(d)
+	v := PodDetailView{Window: winfo, Pod: q.podView(info, w), Containers: []ContainerView{}}
+	byName := q.store.ContainerSamples(k, w.From)
+	if len(byName) == 0 && len(info.Containers) == 1 {
+		byName = map[string][]domain.Sample{info.Containers[0].Name: q.store.PodSamples(k, w.From)}
+	}
+	add := func(c domain.ContainerInfo, samples []domain.Sample) {
+		cv := ContainerView{ContainerInfo: c}
+		cv.Usage, cv.Spark = statsAndSpark(samples, w)
+		cv.LimitRatio = ratioOf(cv.Usage.Now, c.Limits)
+		cv.RequestRatio = ratioOf(cv.Usage.Now, c.Requests)
+		v.Containers = append(v.Containers, cv)
+	}
+	for _, c := range info.Containers {
+		add(c, byName[c.Name]) // no samples yet: empty stats, coverage 0
+		delete(byName, c.Name)
+	}
+	for _, name := range slices.Sorted(maps.Keys(byName)) {
+		add(domain.ContainerInfo{Name: name}, byName[name])
+	}
+	return v, true
 }
 
 // workloadOf is the pod's workload; a pod without a resolved controller is a
