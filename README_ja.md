@@ -40,7 +40,7 @@ linux / darwin / windows（amd64, arm64, armv7）のバイナリは [Releases](h
 
 ## 設定
 
-フラグ、または括弧内の環境変数。Helm chart は主要なものを `values.yaml` で公開しています。
+フラグ、または括弧内の環境変数。コマンドラインのフラグが環境変数より優先され、不正な値の環境変数は既定値に戻さず起動を止めます。`kubeglance --help` で一覧、`kubeglance --version` でバージョンを表示します。Helm chart は主要なものを `values.yaml` で公開しています。
 
 | フラグ | 既定値 | 意味 |
 |---|---|---|
@@ -102,7 +102,7 @@ main.go              全体の配線
 pkg/domain           サンプル、リングバッファ Series、Stats（avg / median / p95 / coverage）、Store、集約。Kubernetes 非依存
 pkg/services         Collector（ポーリング → store）、Query（4つのビュー）、Bootstrap（ピア、ディスク）、Persister
 pkg/infrastructure   k8s（metrics.k8s.io ポーリング、Pod → owner のインフォーマー、ノード）、peer（HTTP）、snapshot（ファイル）
-pkg/interfaces       HTTP API と埋め込み UI（素の HTML / CSS / JS。ビルドなし、CDN なし）
+pkg/interfaces       コマンドライン（cobra: フラグ、環境変数）と HTTP API・埋め込み UI（素の HTML / CSS / JS。ビルドなし、CDN なし）
 charts/kubeglance    Helm chart
 internal/devserver   `mise run dev`: クラスタなしで合成データの UI を表示
 ```

@@ -31,7 +31,7 @@ Everything below builds, passes `go vet`, `golangci-lint run` (2.15.0, 0 issues)
 | Peer discovery (headless Service) + snapshot fetch | `pkg/infrastructure/peer/peer.go` | done, tested with httptest |
 | Snapshot file (gzip JSON, atomic rename) | `pkg/infrastructure/snapshot/file.go` | done, tested |
 | HTTP API + embedded UI (4 screens, drill-down node→pods, workload→pods, window selector, PWA manifest, en/ja i18n) | `pkg/interfaces/handler/**` | done; UI checked by screenshot at 390 px (dark, en and ja) |
-| `main.go` wiring, flags/env, graceful shutdown | `main.go` | done |
+| `main.go` wiring, graceful shutdown; cobra command, flags/env | `main.go`, `pkg/interfaces/cmd.go` | done |
 | Synthetic-data dev server (`mise run dev`) | `internal/devserver/main.go` | done |
 | Helm chart (Deployment w/ RollingUpdate + preStop sleep, Service + headless `-peers`, RBAC read-only, optional PVC, Ingress) | `charts/kubeglance` | done, lints and renders |
 | CI (`ci.yaml`: parallel jobs `ci` = golangci-lint-action + test + build, `helm`, `depgraph` on compose Neo4j), `check-pull-request-title.yaml` (status check `pr-title`), `auto-approve.yaml` (owner + Renovate patch PRs), `release.yaml` (release-please with a GitHub App token → goreleaser stable / `-dev.<sha>` prerelease → ghcr images + OCI chart) — all in the shape of nonchan7720/manifold | `.github/workflows/*.yaml`, `release-please/` | written; needs the `RELEASE_PLEASE_*` secrets, see TODO |
