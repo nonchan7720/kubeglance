@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/nonchan7720/depgraph/main/schema/depgraph.schema.json
 # kubeglance architecture (see README "Architecture").
 #
-#   interfaces  (HTTP handlers, embedded UI, CLI flags)  -> services, domain
+#   interfaces  (CLI command, HTTP handlers, embedded UI) -> services, domain
 #   services    (collector, query, peer sync)            -> domain
 #   infrastructure (metrics-server, informers, bbolt)    -> domain
 #   domain      (series, stats, hierarchy)               -> nothing in the repo

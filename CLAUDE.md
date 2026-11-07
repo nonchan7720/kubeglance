@@ -27,7 +27,7 @@ kubeglance answers one question from a phone in under ten seconds: **"what is ea
 pkg/domain          series (ring buffer), statistics, hierarchy aggregation. Imports nothing in the repo.
 pkg/services        collector (poll → store), query (aggregate by level), peer sync. Imports domain only.
 pkg/infrastructure  metrics-server client, informers (Pod → owner), snapshot file, peer HTTP client. Imports domain only.
-pkg/interfaces      HTTP API + embedded UI. Imports services and domain.
+pkg/interfaces      command line (cobra) + HTTP API + embedded UI. Imports services and domain.
 main.go             wires infrastructure into services and services into interfaces.
 ```
 
