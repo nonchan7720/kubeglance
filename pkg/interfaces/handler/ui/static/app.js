@@ -352,8 +352,27 @@
   $('#status').addEventListener('click', () => { state.statusOpen = !state.statusOpen; renderStatus(); });
   $('#lang').addEventListener('click', () => { setLang(state.lang === 'ja' ? 'en' : 'ja'); go(state.level, state.filter); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+  // ---------- pushshell ----------
+  // Inside a pushshell app (a WebView shell that receives push
+  // notifications), register this phone under the login ID that
+  // --alert-format=pushshell notifies. The app answers getState with ready.
+  const PUSHSHELL_LOGIN = 'kubeglance';
+  if (window.ReactNativeWebView) {
+    window.addEventListener('nativeapp', (e) => {
+      const m = e.detail || {};
+      if (m.type === 'ready' && !(m.loginIds || []).includes(PUSHSHELL_LOGIN)) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'login', loginId: PUSHSHELL_LOGIN }));
+      }
+    });
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'getState' }));
+  }
+
   state.ns = load('ns', '');
   setSort(load('sort', 'cpu'));
   setLang(detectLang());
-  go('cluster');
+  // an alert links here with ?pod=namespace/name or ?node=name
+  const link = new URLSearchParams(location.search);
+  if (link.get('pod')) go('pod', { pod: link.get('pod'), back: { level: 'pods', filter: null } });
+  else if (link.get('node')) go('pods', { node: link.get('node') });
+  else go('cluster');
 })();
