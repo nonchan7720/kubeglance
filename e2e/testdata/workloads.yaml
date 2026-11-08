@@ -1,0 +1,163 @@
+# What the end-to-end tests look at: one workload of every kind kubeglance
+# groups by, and the webhook receiver for the alerts. Every container runs
+# the e2e helper image (scripts/e2e.sh loads it into kind), so nothing is
+# pulled from a registry.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: e2e
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: receiver
+  namespace: e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: receiver}
+  template:
+    metadata:
+      labels: {app: receiver}
+    spec:
+      containers:
+        - name: receiver
+          image: kubeglance-e2e-helper:e2e
+          imagePullPolicy: Never
+          args: [receive]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe:
+            httpGet: {path: /requests, port: http}
+            periodSeconds: 2
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: receiver
+  namespace: e2e
+spec:
+  selector: {app: receiver}
+  ports: [{name: http, port: 80, targetPort: http}]
+---
+# two containers: kubeglance keeps a series per container
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: e2e
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: web}
+  template:
+    metadata:
+      labels: {app: web}
+    spec:
+      containers:
+        - name: app
+          image: kubeglance-e2e-helper:e2e
+          imagePullPolicy: Never
+          args: [hog, "8"]
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+            limits: {memory: 64Mi}
+        - name: sidecar
+          image: kubeglance-e2e-helper:e2e
+          imagePullPolicy: Never
+          args: [sleep]
+          resources:
+            requests: {cpu: 5m, memory: 8Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  namespace: e2e
+spec:
+  clusterIP: None
+  selector: {app: db}
+  ports: [{port: 80}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+  namespace: e2e
+spec:
+  serviceName: db
+  replicas: 1
+  selector:
+    matchLabels: {app: db}
+  template:
+    metadata:
+      labels: {app: db}
+    spec:
+      containers:
+        - name: db
+          image: kubeglance-e2e-helper:e2e
+          imagePullPolicy: Never
+          args: [sleep]
+          resources:
+            requests: {cpu: 5m, memory: 8Mi}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: agent
+  namespace: e2e
+spec:
+  selector:
+    matchLabels: {app: agent}
+  template:
+    metadata:
+      labels: {app: agent}
+    spec:
+      # on every node, the control plane included
+      tolerations: [{operator: Exists}]
+      containers:
+        - name: agent
+          image: kubeglance-e2e-helper:e2e
+          imagePullPolicy: Never
+          args: [sleep]
+          resources:
+            requests: {cpu: 5m, memory: 8Mi}
+---
+# a Job's pod belongs to its CronJob; it runs long enough to be polled
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tick
+  namespace: e2e
+spec:
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: tick
+              image: kubeglance-e2e-helper:e2e
+              imagePullPolicy: Never
+              args: [sleep, 45s]
+              resources:
+                requests: {cpu: 5m, memory: 8Mi}
+---
+# a bare pod is a workload of its own
+apiVersion: v1
+kind: Pod
+metadata:
+  name: solo
+  namespace: e2e
+spec:
+  containers:
+    - name: solo
+      image: kubeglance-e2e-helper:e2e
+      imagePullPolicy: Never
+      args: [sleep]
+      resources:
+        requests: {cpu: 5m, memory: 8Mi}

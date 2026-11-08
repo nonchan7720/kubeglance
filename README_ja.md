@@ -178,13 +178,16 @@ internal/devserver   `mise run dev`: クラスタなしで合成データの UI 
 ## 開発
 
 ```bash
-mise install         # Go, golangci-lint, helm, goreleaser（mise.toml で固定）
+mise install         # Go, golangci-lint, helm, goreleaser, kind, kubectl（mise.toml で固定）
 mise run ci          # lint (incl. govet) + test + helm lint + build + notices check
 mise run notices     # 依存を追加したら THIRD_PARTY_NOTICES.md を再生成
 mise run dev         # 合成データの UI を http://127.0.0.1:8080 で
 mise run run         # 現在の kubeconfig コンテキストに対して実行
+mise run e2e         # kind で E2E テスト（Docker が必要）。下記を参照
 mise run depgraph:watch   # 依存グラフと Findings（Neo4j 用に Docker が必要）
 ```
+
+`mise run e2e`（`scripts/e2e.sh`。CI の `e2e` ジョブも同じ）は 2 ノードの kind クラスタを作り、metrics-server と、レプリカ 2 台・テスト用受信先へのアラートを有効にした chart を入れて `go test -tags e2e ./e2e/` を実行します。確かめるのは、すべての owner の種類がビューで解決されること、ポーリング間隔が metrics-server に従うこと、メモリ limit の 90% を超えた Pod のアラートが（レプリカごとではなく）1 回だけ届き、削除すると解消が 1 回だけ届くこと、ローリング更新の後も新しいレプリカが直近 3 分を欠けなく持っていること（履歴コピー）です。テスト用のコンテナはすべて `e2e/helper` からビルドする 1 つのイメージで動くので、kind のノードイメージと metrics-server 以外は何も pull しません。`E2E_KEEP=1` でクラスタを残せます。
 
 リリース: `main` の Conventional Commits から release-please がリリース PR を作り、マージすると `vX.Y.Z` タグが打たれ、goreleaser がバイナリ・マルチアーキイメージ（`ghcr.io/nonchan7720/kubeglance`）・Helm chart（`oci://ghcr.io/nonchan7720/charts/kubeglance`）を公開します。それ以外の `main` への push は `vX.Y.Z-dev.<sha>` のプレリリースになります。
 

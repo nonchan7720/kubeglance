@@ -178,13 +178,16 @@ The layers are enforced by [depgraph](https://github.com/nonchan7720/depgraph) (
 ## Development
 
 ```bash
-mise install         # Go, golangci-lint, helm, goreleaser (pinned in mise.toml)
+mise install         # Go, golangci-lint, helm, goreleaser, kind, kubectl (pinned in mise.toml)
 mise run ci          # lint (incl. govet) + test + helm lint + build + notices check
 mise run notices     # regenerate THIRD_PARTY_NOTICES.md after adding a dependency
 mise run dev         # UI with synthetic data at http://127.0.0.1:8080
 mise run run         # against your current kubeconfig context
+mise run e2e         # end-to-end on kind (needs Docker): see below
 mise run depgraph:watch   # dependency graph + findings (needs Docker for Neo4j)
 ```
+
+`mise run e2e` (`scripts/e2e.sh`, also the `e2e` CI job) creates a two-node kind cluster, installs metrics-server and the chart with two replicas and alerts to a test receiver, and runs `go test -tags e2e ./e2e/`: every owner kind resolves in the views, the poll interval follows metrics-server, a pod over 90 % of its memory limit is alerted once (not once per replica) and resolved once when it is deleted, and after a rolling update the new replicas still cover the last three minutes (the history copy). Everything runs from one helper image built from `e2e/helper`, so nothing but kind's node image and metrics-server is pulled. Set `E2E_KEEP=1` to keep the cluster.
 
 Releases: release-please opens a release PR from Conventional Commits on `main`; merging it tags `vX.Y.Z` and goreleaser publishes binaries, multi-arch images (`ghcr.io/nonchan7720/kubeglance`) and the Helm chart (`oci://ghcr.io/nonchan7720/charts/kubeglance`). Every other push to `main` publishes a `vX.Y.Z-dev.<sha>` prerelease.
 

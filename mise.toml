@@ -11,6 +11,9 @@ helm = "3.19.0"
 "github:nonchan7720/depgraph" = "0.1.7"
 # THIRD_PARTY_NOTICES.md (mise run notices; CI checks it is current)
 "go:github.com/google/go-licenses/v2" = "2.0.1"
+# end-to-end tests on a kind cluster (mise run e2e)
+"aqua:kubernetes-sigs/kind" = "0.33.0"
+"aqua:kubernetes/kubectl" = "1.37.2"
 
 [env]
 # pure Go, static binary; cross-compiles with plain `go build`
@@ -84,6 +87,10 @@ run = [
   "for os in linux darwin windows; do GOOS=$os go-licenses check . --ignore github.com/nonchan7720/kubeglance --disallowed_types=forbidden,restricted 2>/dev/null || { echo \"forbidden or restricted license for GOOS=$os\"; exit 1; }; done",
   'bash scripts/notices.sh | diff -u THIRD_PARTY_NOTICES.md - >/dev/null || { echo "THIRD_PARTY_NOTICES.md is stale: run mise run notices"; exit 1; }',
 ]
+
+[tasks.e2e]
+description = "End-to-end tests on a kind cluster: metrics-server, two replicas, alerts, a rolling update (needs Docker; E2E_KEEP=1 keeps the cluster)"
+run = "bash scripts/e2e.sh"
 
 [tasks.ci]
 description = "Everything CI runs"

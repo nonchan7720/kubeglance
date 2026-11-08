@@ -46,7 +46,10 @@ Everything below builds, passes `go vet`, `golangci-lint run` (2.15.0, 0 issues)
 mise install && mise run ci     # must be green before any PR
 mise run dev                    # UI with synthetic data at :8080, no cluster
 mise run run                    # real cluster via your kubeconfig
+mise run e2e                    # kind + metrics-server + the chart, then go test -tags e2e ./e2e/
 ```
+
+The e2e runs in CI (job `e2e`). It cannot run in a Claude Code cloud container: the host is cgroup v1, which the kind kubelet refuses, and with that allowed every pod sandbox still fails (`runc ... oom_score_adj: Permission denied`). Change the e2e by pushing and reading the job's log; on failure `scripts/e2e.sh` prints the pods, kubeglance's and the receiver's logs and the events.
 
 - Work on a branch, open a **draft PR** with a Conventional Commits title; never push to `main`.
 - **A release version is pinned in a commit message, never in `release-please/config.json`** (a `release-as` there pins every later release to it too). The squash commit of a single-commit PR here keeps only the title (its body is dropped; multi-commit PRs list each commit's message, but a footer in the middle of that list is not reliably read as one). So put the footer in the PR body as a commit override, which release-please reads in place of the merged commit's message, also after the merge (#29 needed it):
