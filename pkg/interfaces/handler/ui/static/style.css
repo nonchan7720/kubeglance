@@ -1,26 +1,38 @@
 :root {
-  --bg: #0f1115;
-  --card: #171a21;
-  --line: #262a33;
-  --fg: #e7e9ee;
-  --muted: #8b93a7;
-  --cpu: #4fa3ff;
-  --mem: #b08cff;
-  --ok: #3ccf8e;
-  --warn: #f5b942;
-  --hot: #ff5c5c;
-  --req: rgba(255, 255, 255, 0.35);
-  --lim: rgba(255, 255, 255, 0.7);
-  --gap: rgba(245, 185, 66, 0.22);
-  --avg: rgba(255, 255, 255, 0.85);
+  /* The k8s-ecosystem look (Headlamp, Kiali / PatternFly, Kubernetes
+     Dashboard): calm neutrals, one brand blue, high-contrast text (primary
+     14.5:1, secondary 8.6:1; Grafana's secondary is 5.3:1). Series checked
+     with the dataviz validator: CPU = Kubernetes blue, memory = bluish green
+     (Wong 2011) pass the colour-blind and normal-vision floors in both modes
+     with the same values; the old blue + purple did not (ΔE 2.5). ok / warn /
+     hot are state only (≥ 70 % / ≥ 90 %), never a series. */
+  --bg: #121417;
+  --card: #1b1d21;
+  --line: #2e3138;          /* hairline, bar track */
+  --border: rgba(236, 238, 241, 0.10);
+  --fg: #eceef1;
+  --muted: #b4b9c2;
+  --cpu: #326ce5;
+  --mem: #009e73;
+  --ok: #5ba352;
+  --warn: #f0ab00;
+  --hot: #f0561d;
+  --req: rgba(236, 238, 241, 0.45);
+  --lim: rgba(236, 238, 241, 0.80);
+  --gap: rgba(236, 238, 241, 0.09); /* no data: neutral, not a warning hue */
+  --gap-text: #f0ab00;
+  --avg: #eceef1;
   --radius: 12px;
   --pad: 12px;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #f5f6f8; --card: #ffffff; --line: #e3e6ec; --fg: #14171d; --muted: #667085;
-    --req: rgba(0, 0, 0, 0.35); --lim: rgba(0, 0, 0, 0.7); --gap: rgba(196, 128, 0, 0.2); --avg: rgba(0, 0, 0, 0.6);
+    --bg: #f2f3f5; --card: #ffffff; --line: #e4e6ea; --border: rgba(22, 24, 29, 0.10);
+    --fg: #16181d; --muted: #4f5663;
+    --cpu: #326ce5; --mem: #009e73; --ok: #3e8635; --warn: #e0a100; --hot: #c9190b;
+    --req: rgba(22, 24, 29, 0.45); --lim: rgba(22, 24, 29, 0.80);
+    --gap: rgba(22, 24, 29, 0.07); --gap-text: #8a5d00; --avg: #16181d;
     color-scheme: light;
   }
 }
@@ -64,7 +76,7 @@ nav button.active { color: var(--fg); border-color: var(--cpu); }
 
 main { padding: 0 var(--pad) 16px; display: flex; flex-direction: column; gap: 8px; }
 .muted { color: var(--muted); }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
 .card.tap { cursor: pointer; }
 .card.tap:active { filter: brightness(1.15); }
 .card .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
@@ -89,7 +101,7 @@ main { padding: 0 var(--pad) 16px; display: flex; flex-direction: column; gap: 8
 .nums .now { color: var(--fg); font-weight: 600; }
 .nums span { white-space: nowrap; }
 .nums.stats { margin-top: 0; column-gap: 10px; flex-wrap: wrap; justify-content: flex-start; }
-.gap { color: var(--warn); font-size: 11px; }
+.gap { color: var(--gap-text); font-size: 11px; }
 
 .spark { display: block; width: 100%; height: 22px; margin-top: 3px; overflow: visible; }
 .spark .area { stroke: none; opacity: 0.22; }
@@ -101,7 +113,7 @@ main { padding: 0 var(--pad) 16px; display: flex; flex-direction: column; gap: 8
 .gapkey { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--gap); vertical-align: -1px; }
 
 .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.kpi { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; }
+.kpi { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; }
 .kpi .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .kpi .k { font-size: 12px; color: var(--muted); }
 .note { font-size: 13px; color: var(--muted); padding: 2px 2px 0; }
