@@ -46,12 +46,24 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 header { position: sticky; top: 0; z-index: 2; background: var(--bg);
   padding: calc(env(safe-area-inset-top) + 10px) var(--pad) 8px; border-bottom: 1px solid var(--line);
   display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-header h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: 0.2px; }
+header h1 { margin: 0; line-height: 0; }
+/* wordmark.svg (scripts/wordmark.py): the name, its sparkline and the kingfisher, its viewBox centred on the letters,
+   so flex centring lines the dot and the controls up with them */
+.wordmark { display: block; width: auto; height: 36px; }
 .title { display: flex; align-items: center; gap: 8px; }
-.status { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
-.status.ok { background: var(--ok); } .status.bad { background: var(--hot); }
+/* the dot sits right after the title (6 px); its tap area reaches past it */
+.status { position: relative; display: flex; align-items: center; justify-content: center; flex: none;
+  margin-left: -2px; padding: 0; border: 0; background: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.status::after { content: ""; position: absolute; inset: -12px; }
+.dot { display: block; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.ok .dot { background: var(--ok); } .bad .dot { background: var(--hot); }
+.statuspanel { margin: 8px var(--pad) 0; padding: 10px 12px; background: var(--card); border: 1px solid var(--line);
+  border-radius: 10px; font-size: 13px; color: var(--muted); }
+.statuspanel.bad { border-color: var(--hot); }
+.statuspanel p { margin: 2px 0; }
+.statuspanel .st-head { display: flex; align-items: center; gap: 8px; color: var(--fg); font-weight: 650; font-size: 14px; margin-bottom: 4px; }
 .controls { display: flex; align-items: center; gap: 8px; }
-.updated { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.updated { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .lang { background: var(--card); color: var(--muted); border: 1px solid var(--line); border-radius: 8px;
   padding: 6px 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; }
 select { background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 8px;

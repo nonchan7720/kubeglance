@@ -1,5 +1,6 @@
-"""Writes docs/wordmark.svg and docs/wordmark-on-dark.svg: "kubeglance" in
-Inter Display SemiBold converted to outlines (the files need no font), a
+"""Writes docs/wordmark.svg, docs/wordmark-on-dark.svg and the UI's
+pkg/interfaces/handler/ui/static/wordmark.svg: "kubeglance" in Inter Display
+SemiBold converted to outlines (the files need no font), a
 sparkline (the last 30 minutes) over "g" and "l", and the logo's kingfisher
 (its own paths, unchanged, placed with a transform; a test checks this)
 standing on the line's latest point and looking back along it.
@@ -75,9 +76,9 @@ bird = f'  <g transform="translate({ox:.4f} {oy:.4f}) scale({k:.6f})">\n{marks}\
 kube, glance = pens[0].getCommands(), pens[1].getCommands() + spark
 
 
-def svg(vb, name, accent):
+def svg(vb, name, accent, style=''):
     return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb}">
-  <path fill="{name}" d="{kube}"/>
+{style}  <path fill="{name}" d="{kube}"/>
   <path fill="{accent}" d="{glance}"/>
 {bird}
 </svg>
@@ -88,3 +89,16 @@ vb = f'{x0:.2f} {y0:.2f} {x1 - x0:.2f} {y1 - y0:.2f}'
 open('docs/wordmark.svg', 'w').write(svg(vb, NAME['light'], ACCENT['light']))
 open('docs/wordmark-on-dark.svg', 'w').write(svg(vb, NAME['dark'], ACCENT['dark']))
 
+
+# The UI's header: one file for both themes (the colours follow the page's
+# colour scheme) and a viewBox centred on the letters (cap height to
+# baseline: y = -100 to 0), so flex centring lines the title up with what
+# sits next to it.
+half = max(-50 - y0, y1 + 50)
+ui_vb = f'{x0:.2f} {-50 - half:.2f} {x1 - x0:.2f} {2 * half:.2f}'
+style = (f'  <style>.name {{ fill: {NAME["light"]}; }} .accent {{ fill: {ACCENT["light"]}; }} '
+         f'@media (prefers-color-scheme: dark) {{ .name {{ fill: {NAME["dark"]}; }} .accent {{ fill: {ACCENT["dark"]}; }} }}</style>\n')
+ui = svg(ui_vb, NAME['light'], ACCENT['light'], style)
+ui = ui.replace(f'<path fill="{NAME["light"]}" d="{kube}"', f'<path class="name" fill="{NAME["light"]}" d="{kube}"')
+ui = ui.replace(f'<path fill="{ACCENT["light"]}" d="{glance}"', f'<path class="accent" fill="{ACCENT["light"]}" d="{glance}"')
+open('pkg/interfaces/handler/ui/static/wordmark.svg', 'w').write(ui)

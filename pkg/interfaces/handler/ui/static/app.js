@@ -6,7 +6,7 @@
   const $ = (sel) => document.querySelector(sel);
   const main = $('#main');
   const crumb = $('#crumb');
-  const state = { level: 'cluster', window: '30m', filter: null, timer: null, interval: 15000, lang: 'en', win: null, sort: 'cpu', ns: '' };
+  const state = { level: 'cluster', window: '30m', filter: null, timer: null, interval: 15000, lang: 'en', win: null, sort: 'cpu', ns: '', status: null, healthy: null, statusOpen: false };
   // per-device conveniences; storage may be unavailable (private mode)
   const load = (k, d) => { try { return localStorage.getItem('kubeglance.' + k) ?? d; } catch { return d; } };
   const save = (k, v) => { try { localStorage.setItem('kubeglance.' + k, v); } catch { /* ignore */ } };
@@ -27,7 +27,10 @@
       notready: 'NotReady', req: 'req', 'per.pod': 'per pod', 'cpu.of.req': 'cpu', 'no.cpu.req': 'no cpu request',
       gone: 'gone', 'no.workloads': 'no workloads', 'no.pods': 'no pods', 'load.fail': 'could not load',
       'node.filter': (n) => `node ${n}`, 'workload.filter': (w) => `workload ${w}`,
-      collecting: (s, v) => `collecting every ${s}s · ${v}`, 'collector.bad': (e) => `collector: ${e}`, 'no.data': 'no data yet',
+      'st.label': 'collection status', 'st.ok': (s) => `Collecting every ${s} s`, 'st.bad': 'Not collecting',
+      'st.last': (time, ago) => `last collected ${time} (${ago})`, 'st.never': 'nothing collected yet',
+      'st.error': (e) => `error: ${e}`, 'st.gap': 'Until it recovers, this time is missing from the history (shaded in the charts).',
+      'st.errors': (n) => `${n} failed polls since start`, 'ago.s': (n) => `${n} s ago`, 'ago.m': (n) => `${n} min ago`,
       'ns.all': 'all namespaces', 'sort.by': 'sort by', 'sort.name': 'A–Z', 'spark.title': 'usage over the window; shaded = no data',
       'pod.filter': (p) => `pod ${p}`, containers: 'Containers', 'no.containers': 'no per-container data for this pod yet',
     },
@@ -43,7 +46,10 @@
       notready: 'NotReady', req: 'req', 'per.pod': 'Pod あたり', 'cpu.of.req': 'cpu', 'no.cpu.req': 'cpu request なし',
       gone: '消滅', 'no.workloads': 'ワークロードなし', 'no.pods': 'Pod なし', 'load.fail': '読み込めません',
       'node.filter': (n) => `ノード ${n}`, 'workload.filter': (w) => `ワークロード ${w}`,
-      collecting: (s, v) => `${s}秒ごとに収集中 · ${v}`, 'collector.bad': (e) => `コレクタ: ${e}`, 'no.data': 'まだデータなし',
+      'st.label': '収集の状態', 'st.ok': (s) => `${s} 秒ごとに収集中`, 'st.bad': '収集できていません',
+      'st.last': (time, ago) => `最終取得 ${time}（${ago}）`, 'st.never': 'まだ 1 回も取得していません',
+      'st.error': (e) => `エラー: ${e}`, 'st.gap': '回復するまでの間は履歴が欠けます（グラフでは網掛け）。',
+      'st.errors': (n) => `起動してから ${n} 回失敗`, 'ago.s': (n) => `${n} 秒前`, 'ago.m': (n) => `${n} 分前`,
       'ns.all': 'すべての namespace', 'sort.by': '並び替え', 'sort.name': '名前', 'spark.title': 'ウィンドウ内の推移。網掛け = データなし',
       'pod.filter': (p) => `Pod ${p}`, containers: 'コンテナ', 'no.containers': 'この Pod のコンテナ別データはまだありません',
     },
@@ -68,6 +74,7 @@
     document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
     document.querySelectorAll('[data-i18n-html]').forEach((el) => { el.innerHTML = t(el.dataset.i18nHtml); });
     document.querySelectorAll('[data-i18n-label]').forEach((el) => { el.setAttribute('aria-label', t(el.dataset.i18nLabel)); });
+    if (state.status) renderStatus();
   }
 
   // ---------- formatting ----------
@@ -285,6 +292,35 @@
     refresh();
   }
 
+  // ---------- collection status ----------
+  // The dot next to the title is the collector's health; tapping it opens a
+  // short explanation under the header. It opens by itself when collection
+  // starts failing, since the history then has a gap.
+  const clock = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+  const ago = (ms) => (ms < 60000 ? t('ago.s', Math.max(0, Math.round(ms / 1000))) : t('ago.m', Math.floor(ms / 60000)));
+
+  function renderStatus() {
+    const s = state.status;
+    if (!s) return;
+    const c = s.collector;
+    const btn = $('#status');
+    const panel = $('#statuspanel');
+    if (state.healthy !== false && !c.healthy) state.statusOpen = true; // just started failing
+    state.healthy = c.healthy;
+    btn.className = 'status ' + (c.healthy ? 'ok' : 'bad');
+    btn.setAttribute('aria-expanded', String(state.statusOpen));
+    const last = c.lastSuccess ? t('st.last', clock(new Date(c.lastSuccess)), ago(Date.now() - Date.parse(c.lastSuccess))) : t('st.never');
+    const lines = [last];
+    if (!c.healthy && c.lastError) lines.push(t('st.error', esc(c.lastError)));
+    if (!c.healthy) lines.push(t('st.gap'));
+    if (c.errors) lines.push(t('st.errors', c.errors));
+    lines.push(esc(s.version));
+    panel.className = 'statuspanel ' + (c.healthy ? 'ok' : 'bad');
+    panel.innerHTML = `<p class="st-head"><span class="dot"></span>${c.healthy ? t('st.ok', s.interval / 1e9) : t('st.bad')}</p>` +
+      lines.map((l) => `<p>${l}</p>`).join('');
+    panel.hidden = !state.statusOpen;
+  }
+
   async function refresh() {
     const q = new URLSearchParams({ window: state.window });
     let path = state.level;
@@ -297,13 +333,11 @@
       state.win = data.window;
       ({ cluster: renderCluster, nodes: renderNodes, workloads: renderWorkloads, pods: renderPods, pod: renderPod })[state.level](data);
       if (st.ok) {
-        const s = await st.json();
-        const dot = $('#status');
-        dot.className = 'status ' + (s.collector.healthy ? 'ok' : 'bad');
-        dot.title = s.collector.healthy ? t('collecting', s.interval / 1e9, s.version) : t('collector.bad', s.collector.lastError || t('no.data'));
-        state.interval = Math.max(5000, s.interval / 1e6);
+        state.status = await st.json();
+        renderStatus();
+        state.interval = Math.max(5000, state.status.interval / 1e6);
       }
-      $('#updated').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      $('#updated').textContent = clock(new Date());
     } catch (e) {
       main.innerHTML = `<p class="muted">${t('load.fail')}: ${esc(e.message)}</p>`;
     }
@@ -315,6 +349,7 @@
   $('#window').addEventListener('change', (e) => { state.window = e.target.value; refresh(); });
   $('#ns').addEventListener('change', (e) => { state.ns = e.target.value; save('ns', state.ns); refresh(); });
   document.querySelectorAll('#sort button').forEach((b) => b.addEventListener('click', () => { setSort(b.dataset.sort); refresh(); }));
+  $('#status').addEventListener('click', () => { state.statusOpen = !state.statusOpen; renderStatus(); });
   $('#lang').addEventListener('click', () => { setLang(state.lang === 'ja' ? 'en' : 'ja'); go(state.level, state.filter); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
   state.ns = load('ns', '');
