@@ -2,7 +2,6 @@ package peer
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -104,7 +103,7 @@ func TestClientSendsTheAuthToken(t *testing.T) {
 	var got string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got = r.Header.Get("Authorization")
-		_ = json.NewEncoder(w).Encode(domain.Snapshot{})
+		_ = domain.NewStore(15*time.Second, time.Minute).WriteSnapshot(w)
 	}))
 	defer srv.Close()
 	host, portStr, _ := net.SplitHostPort(srv.Listener.Addr().String())
