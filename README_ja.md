@@ -91,7 +91,7 @@ linux / darwin / windows（amd64, arm64, armv7）のバイナリは [Releases](h
 | フラグ | 既定値 | 意味 |
 |---|---|---|
 | `--addr` (`KUBEGLANCE_ADDR`) | `:8080` | 待ち受けアドレス |
-| `--interval` (`KUBEGLANCE_INTERVAL`) | 自動 | ポーリング間隔。既定では metrics-server の `--metric-resolution` に合わせる。毎回のポーリングで metrics-server が返す `window` から読む（k3s は 15 秒。マネージドでは別の値のこともある）。変更は 3 回連続で同じ値が報告されたら再起動なしで追従し、最初の値が分かるまでは 15 秒。変更をまたぐウィンドウの統計は、各区間をその区間の間隔で数える。解像度より短くしても同じ値を 2 回読むだけなので、間隔を固定したいときだけ指定する（指定するとその後は変わらない） |
+| `--interval` (`KUBEGLANCE_INTERVAL`) | 自動 | ポーリング間隔。既定では metrics-server の `--metric-resolution` に合わせる。metrics-server が返す kubelet のサンプルの時刻の間隔を直近 3 分で平均して求める（既定は 15 秒。マネージドでは別の値のこともある）。1 回の `window` からは求めない。`window` は metrics-server が持つ 2 つのサンプルの間隔で、スクレイプで新しい kubelet のサンプルが得られなかったときは解像度より長くなるため。変更は 3 回連続で同じ値が報告されたら再起動なしで追従し、最初の値が分かるまでは 15 秒。変更をまたぐウィンドウの統計は、各区間をその区間の間隔で数える。解像度より短くしても同じ値を 2 回読むだけなので、間隔を固定したいときだけ指定する（指定するとその後は変わらない） |
 | `--retention` (`KUBEGLANCE_RETENTION`) | `24h` | メモリに保持する履歴。ウィンドウの上限 |
 | `--peer-host` (`KUBEGLANCE_PEER_HOST`) | | レプリカの headless Service。空ならピアコピー無効 |
 | `--peer-port` (`KUBEGLANCE_PEER_PORT`) | `8080` | ピアのポート |

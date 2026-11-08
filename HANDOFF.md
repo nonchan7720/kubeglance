@@ -15,7 +15,7 @@ The design was settled in conversation with the owner, and these decisions are *
 | History in a process-local ring buffer, no external DB | owner approved the memory estimate (~10 MB / 100 pods / 24 h) |
 | Zero-downtime update without clustering: `replicas: 2` + peer snapshot copy on start + preStop/shutdown grace | metrics-server is a shared source of truth, so replicas need no consensus |
 | On-disk snapshot is an *optional safety net*, not the mechanism | k3s local-path storage is RWO + node-bound, so it cannot make rolling updates lossless |
-| metrics-server polled at its own resolution, never faster (read from the `window` every poll reports and followed without a restart; 15 s on k3s; `--interval` fixes it); owner mapping via informers | every new value read once, none twice; managed clusters set their own resolution (metrics-server allows ≥ 10 s); no load on kubelets |
+| metrics-server polled at its own resolution, never faster (told from the spacing of the kubelet samples metrics-server reports, `k8s.resolutionEstimator`, and followed without a restart; `--interval` fixes it); owner mapping via informers | every new value read once, none twice; managed clusters set their own resolution (metrics-server allows ≥ 10 s); no load on kubelets |
 | Go, layered `pkg/{domain,services,infrastructure,interfaces}`, mise, golangci-lint 2.15, release-please, goreleaser, renovate | the owner's house style (same as nonchan7720/depgraph) |
 | Quality enforced by claude-hook-gate (`.claude/gate.yaml`) and depgraph (`.depgraph.yml`) | the owner's own tools; keep them green |
 
@@ -95,6 +95,9 @@ The e2e runs in CI (job `e2e`). It cannot run in a Claude Code cloud container: 
 - **`domain.Alerts` is level-triggered.** `Pending` is "state differs from what the receiver was told"; delivery failures are retries for free. `Delivered` ignores an alert whose status changed since `Pending`. A rule's verdict counts gaps as below (`Evaluate`): never make a gap fire an alert, and never shrink the window to the samples present.
 - **The webhook URL and headers are secrets.** The URL is logged and put in errors as scheme + host only (`redactURL` in `cmd.go`, `webhook.Redact`); the chart passes it as an env var (or from a Secret), never a flag. Headers come only from `--alert-headers-file`.
 - **pushshell's login ID is `kubeglance`** (`webhook.LoginID` and `PUSHSHELL_LOGIN` in `app.js`): change both or neither. pushshell's `collapseKey` allows 64 characters, hence the hash.
+
+- **metrics-server's `window` is not its resolution.** It is the gap between the two kubelet samples metrics-server holds (`last.Timestamp - prev.Timestamp` in its `pkg/storage`), and a scrape that brings no newer sample keeps the older one: kind's kubelets made it alternate 20 s and 10 s at a 15 s resolution. `resolutionEstimator` averages the spacing of every distinct sample seen over three minutes instead. The e2e test checks the detected interval.
+- **`Expected` counts grid instants, and windows end at the newest due slot** (`Timeline.Expected`, `services.dueWindow`). `length / step + 1` claims a sample too many for any window that does not start on the grid, and the current slot is not a gap before its mid-slot poll; both made a complete history show "gaps" in the UI. Both were found by the e2e.
 
 ## Branch rulesets
 
