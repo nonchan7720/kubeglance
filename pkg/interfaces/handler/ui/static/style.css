@@ -47,9 +47,9 @@ header { position: sticky; top: 0; z-index: 2; background: var(--bg);
   padding: calc(env(safe-area-inset-top) + 10px) var(--pad) 8px; border-bottom: 1px solid var(--line);
   display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 header h1 { margin: 0; line-height: 0; }
-/* wordmark.svg (scripts/wordmark.py): the logo and the name, its viewBox centred on the letters,
+/* wordmark.svg (scripts/wordmark.py): the name, its sparkline and the kingfisher, its viewBox centred on the letters,
    so flex centring lines the dot and the controls up with them */
-.wordmark { display: block; width: auto; height: 24px; }
+.wordmark { display: block; width: auto; height: 36px; }
 .title { display: flex; align-items: center; gap: 8px; }
 /* the dot sits right after the title (6 px); its tap area reaches past it */
 .status { position: relative; display: flex; align-items: center; justify-content: center; flex: none;

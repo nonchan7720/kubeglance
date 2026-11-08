@@ -1,91 +1,104 @@
 """Writes docs/wordmark.svg, docs/wordmark-on-dark.svg and the UI's
-pkg/interfaces/handler/ui/static/wordmark.svg: the logo's own
-paths (unchanged, placed with a transform; a test checks this) and
-"kubeglance" in Inter Display SemiBold converted to outlines, so the files
-need no font.
+pkg/interfaces/handler/ui/static/wordmark.svg: "kubeglance" in Inter Display
+SemiBold converted to outlines (the files need no font), a
+sparkline (the last 30 minutes) over "g" and "l", and the logo's kingfisher
+(its own paths, unchanged, placed with a transform; a test checks this)
+standing on the line's latest point and looking back along it.
 
-Run it again whenever docs/logo.svg changes:
+docs/logo.svg is the master drawing of the bird; run this again whenever it
+changes:
 
-    pip install fonttools==4.60.1 uharfbuzz==0.51.1
+    pip install fonttools==4.60.1 uharfbuzz==0.51.1 shapely==2.0.6
     python3 scripts/wordmark.py /path/to/InterDisplay-SemiBold.otf
 
 Inter 4.0 (SIL Open Font License 1.1; Debian/Ubuntu: fonts-inter,
-otherwise https://github.com/rsms/inter/releases). The mark is 1.32 times
-the height of the 'k', stands on the baseline, and sits 0.30 of that height
-before the name."""
+otherwise https://github.com/rsms/inter/releases). Units: the ascender of
+'k' is 100, the baseline is y = 0, y grows down."""
 import re, sys
 import uharfbuzz as hb
 from fontTools.ttLib import TTFont
 from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.boundsPen import BoundsPen
+from shapely.geometry import LineString
 
-TEXT = 'kubeglance'
+TEXT, SPLIT = 'kubeglance', 4          # "kube" | "glance"
 FONT = sys.argv[1]
-icon_path, out_light, out_dark = 'docs/logo.svg', 'docs/wordmark.svg', 'docs/wordmark-on-dark.svg'
-MARK_H, GAP = 1.32, 0.30      # of the ascender of 'k'
+NAME = {'light': '#16181d', 'dark': '#eceef1'}     # --fg in style.css
+ACCENT = {'light': '#1597cc', 'dark': '#2db6e0'}   # "glance" and its line
+# Positions relative to the left edge of the 'l' (x) and the baseline (y).
+BIRD = (-36.6, -177.5, 73.3)  # the kingfisher's left, top and height
+LINE_W = 7.3                  # the sparkline's weight
+# its centre line, left to right: flat, a spike, a dip, then the flat top the
+# kingfisher stands on, which stops just past the l's left edge
+SPARK = [(-82.3, -91.0), (-61.6, -91.0), (-42.2, -116.0), (-23.8, -86.9), (-9.2, -114.1), (7.5, -114.1)]
 
-icon = open(icon_path).read()
+icon = open('docs/logo.svg').read()
 paths = re.findall(r'<path fill="(#[0-9a-f]{6})" d="([^"]+)"/>', icon)
 nums = [float(v) for _, d in paths for v in re.findall(r'-?\d+\.?\d*', d)]
-xs, ys = nums[0::2], nums[1::2]
-mx0, my0, mx1, my1 = min(xs), min(ys), max(xs), max(ys)
-
+my0, my1 = min(nums[1::2]), max(nums[1::2])
+mx0 = min(nums[0::2])
 font = TTFont(FONT)
 gs = font.getGlyphSet()
-blob = hb.Blob.from_file_path(FONT)
-hbf = hb.Font(hb.Face(blob))
+hbf = hb.Font(hb.Face(hb.Blob.from_file_path(FONT)))
 buf = hb.Buffer(); buf.add_str(TEXT); buf.guess_segment_properties()
 hb.shape(hbf, buf, {'kern': True, 'liga': True})
 names = [hbf.glyph_to_string(i.codepoint) for i in buf.glyph_infos]
-
 bp = BoundsPen(gs); gs['k'].draw(bp)
-asc = bp.bounds[3]                  # top of 'k' above the baseline, font units
-s = 100 / asc                       # 1 unit of output = asc / 100
+s = 100 / bp.bounds[3]
 
-# text: baseline at y = 0, flipped (SVG y grows down)
-pen = SVGPathPen(gs, ntos=lambda v: f'{v:.2f}'.rstrip('0').rstrip('.'))
-x = 0
+ntos = lambda v: f'{v:.2f}'.rstrip('0').rstrip('.')
+pens = [SVGPathPen(gs, ntos=ntos), SVGPathPen(gs, ntos=ntos)]
 tb = BoundsPen(gs)
-for name, pos in zip(names, buf.glyph_positions):
+x = 0
+for i, (name, pos) in enumerate(zip(names, buf.glyph_positions)):
     t = (s, 0, 0, -s, (x + pos.x_offset) * s, -pos.y_offset * s)
-    gs[name].draw(TransformPen(pen, t))
+    gs[name].draw(TransformPen(pens[i >= SPLIT], t))
     gs[name].draw(TransformPen(tb, t))
+    if name == 'l':
+        lb = BoundsPen(gs); gs[name].draw(TransformPen(lb, t))
     x += pos.x_advance
 tx0, ty0, tx1, ty1 = tb.bounds
+lx0 = lb.bounds[0]
 
-# mark: bottom on the baseline, height MARK_H × asc, GAP × asc before the text
-k = MARK_H * 100 / (my1 - my0)
-ox = tx0 - GAP * 100 - mx1 * k
-oy = 0 - my1 * k
-x0, y0 = ox + mx0 * k, oy + my0 * k
+# the sparkline: round ends and corners, on its own above the letters
+line = LineString([(lx0 + dx, y) for dx, y in SPARK]).buffer(
+    LINE_W / 2, cap_style='round', join_style='round', quad_segs=12)
+spark = 'M' + 'L'.join(f'{ntos(a)} {ntos(b)}' for a, b in list(line.exterior.coords)[:-1]) + 'Z'
+
+# the bird: its own paths, scaled and placed; drawn last, its feet on the line
+k = BIRD[2] / (my1 - my0)
+ox, oy = lx0 + BIRD[0] - mx0 * k, BIRD[1] - my0 * k
+x0, y0 = min(tx0, line.bounds[0]), min(BIRD[1], line.bounds[1])
 x1, y1 = tx1, max(ty1, 0)
-vb = f'{x0:.2f} {y0:.2f} {x1 - x0:.2f} {y1 - y0:.2f}'
+marks = '\n'.join(f'    <path fill="{c}" d="{d}"/>' for c, d in paths)
+bird = f'  <g transform="translate({ox:.4f} {oy:.4f}) scale({k:.6f})">\n{marks}\n  </g>'
+kube, glance = pens[0].getCommands(), pens[1].getCommands() + spark
 
-def svg(fg):
-    marks = '\n'.join(f'    <path fill="{c}" d="{d}"/>' for c, d in paths)
+
+def svg(vb, name, accent, style=''):
     return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb}">
-  <g transform="translate({ox:.4f} {oy:.4f}) scale({k:.6f})">
-{marks}
-  </g>
-  <path fill="{fg}" d="{pen.getCommands()}"/>
+{style}  <path fill="{name}" d="{kube}"/>
+  <path fill="{accent}" d="{glance}"/>
+{bird}
 </svg>
 '''
-open(out_light, 'w').write(svg('#16181d'))
-open(out_dark, 'w').write(svg('#eceef1'))
 
-# The UI's header: one file for both themes (the name follows the page's
-# colour scheme, the same colours as --fg in style.css), and a viewBox
-# centred on the letters (cap height to baseline: y = -100 to 0), so flex
-# centring lines the title up with what sits next to it.
+
+vb = f'{x0:.2f} {y0:.2f} {x1 - x0:.2f} {y1 - y0:.2f}'
+open('docs/wordmark.svg', 'w').write(svg(vb, NAME['light'], ACCENT['light']))
+open('docs/wordmark-on-dark.svg', 'w').write(svg(vb, NAME['dark'], ACCENT['dark']))
+
+
+# The UI's header: one file for both themes (the colours follow the page's
+# colour scheme) and a viewBox centred on the letters (cap height to
+# baseline: y = -100 to 0), so flex centring lines the title up with what
+# sits next to it.
 half = max(-50 - y0, y1 + 50)
 ui_vb = f'{x0:.2f} {-50 - half:.2f} {x1 - x0:.2f} {2 * half:.2f}'
-marks = '\n'.join(f'    <path fill="{c}" d="{d}"/>' for c, d in paths)
-open('pkg/interfaces/handler/ui/static/wordmark.svg', 'w').write(f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="{ui_vb}">
-  <style>.name {{ fill: #16181d; }} @media (prefers-color-scheme: dark) {{ .name {{ fill: #eceef1; }} }}</style>
-  <g transform="translate({ox:.4f} {oy:.4f}) scale({k:.6f})">
-{marks}
-  </g>
-  <path class="name" d="{pen.getCommands()}"/>
-</svg>
-''')
+style = (f'  <style>.name {{ fill: {NAME["light"]}; }} .accent {{ fill: {ACCENT["light"]}; }} '
+         f'@media (prefers-color-scheme: dark) {{ .name {{ fill: {NAME["dark"]}; }} .accent {{ fill: {ACCENT["dark"]}; }} }}</style>\n')
+ui = svg(ui_vb, NAME['light'], ACCENT['light'], style)
+ui = ui.replace(f'<path fill="{NAME["light"]}" d="{kube}"', f'<path class="name" fill="{NAME["light"]}" d="{kube}"')
+ui = ui.replace(f'<path fill="{ACCENT["light"]}" d="{glance}"', f'<path class="accent" fill="{ACCENT["light"]}" d="{glance}"')
+open('pkg/interfaces/handler/ui/static/wordmark.svg', 'w').write(ui)

@@ -398,8 +398,9 @@ func TestWordmarkCarriesTheLogo(t *testing.T) {
 				t.Errorf("%s does not draw the logo path %.60s...: regenerate it with scripts/wordmark.py", name, m)
 			}
 		}
-		if n := len(svgPath.FindAll(wm, -1)); n != len(marks)+1 {
-			t.Errorf("%s has %d paths, want the logo's %d and one for the name", name, n, len(marks))
+		// the name is two paths: "kube" and "glance" with its sparkline
+		if n := len(svgPath.FindAll(wm, -1)); n != len(marks)+2 {
+			t.Errorf("%s has %d paths, want the logo's %d and two for the name", name, n, len(marks))
 		}
 	}
 }
