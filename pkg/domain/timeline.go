@@ -51,20 +51,34 @@ func (t Timeline) span(from, to time.Time, f func(a, b time.Time, step time.Dura
 }
 
 // Expected is how many samples a gap-free [from, to] holds, each part at
-// its own step: a part that ends before to is half-open and holds
-// ceil(length / step) instants; the part that ends at to also holds its end.
-// With one resolution this is (to - from) / step + 1.
+// its own step: the instants of its grid (where Store.Slot puts samples)
+// inside the part. A part that ends before to is half-open; the part that
+// ends at to also holds its end. A window ending "now" rarely starts on the
+// grid, so this is not (to - from) / step + 1, which would claim a sample
+// too many and report a complete window as one with a gap.
 func (t Timeline) Expected(from, to time.Time) int {
 	n := 0
 	t.span(from, to, func(a, b time.Time, step time.Duration) {
-		d := b.Sub(a)
-		if b.Before(to) {
-			n += int((d + step - 1) / step)
-		} else {
-			n += int(d/step) + 1
-		}
+		n += gridInstants(a, b, step, !b.Before(to))
 	})
 	return n
+}
+
+// gridInstants counts the multiples of step in [a, b], or in [a, b) when
+// closed is false.
+func gridInstants(a, b time.Time, step time.Duration, closed bool) int {
+	first := a.Truncate(step)
+	if first.Before(a) {
+		first = first.Add(step)
+	}
+	last := b.Truncate(step)
+	if !closed && last.Equal(b) {
+		last = last.Add(-step)
+	}
+	if last.Before(first) {
+		return 0
+	}
+	return int(last.Sub(first)/step) + 1
 }
 
 // Coarsest is the largest step in effect anywhere in [from, to].

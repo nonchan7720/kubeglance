@@ -15,7 +15,7 @@ The design was settled in conversation with the owner, and these decisions are *
 | History in a process-local ring buffer, no external DB | owner approved the memory estimate (~10 MB / 100 pods / 24 h) |
 | Zero-downtime update without clustering: `replicas: 2` + peer snapshot copy on start + preStop/shutdown grace | metrics-server is a shared source of truth, so replicas need no consensus |
 | On-disk snapshot is an *optional safety net*, not the mechanism | k3s local-path storage is RWO + node-bound, so it cannot make rolling updates lossless |
-| metrics-server polled at its own resolution, never faster (read from the `window` every poll reports and followed without a restart; 15 s on k3s; `--interval` fixes it); owner mapping via informers | every new value read once, none twice; managed clusters set their own resolution (metrics-server allows ≥ 10 s); no load on kubelets |
+| metrics-server polled at its own resolution, never faster (told from the spacing of the kubelet samples metrics-server reports, `k8s.resolutionEstimator`, and followed without a restart; `--interval` fixes it); owner mapping via informers | every new value read once, none twice; managed clusters set their own resolution (metrics-server allows ≥ 10 s); no load on kubelets |
 | Go, layered `pkg/{domain,services,infrastructure,interfaces}`, mise, golangci-lint 2.15, release-please, goreleaser, renovate | the owner's house style (same as nonchan7720/depgraph) |
 | Quality enforced by claude-hook-gate (`.claude/gate.yaml`) and depgraph (`.depgraph.yml`) | the owner's own tools; keep them green |
 
@@ -86,6 +86,9 @@ mise run run                    # real cluster via your kubeconfig
 - **The auth token is a secret**: it comes only from `--auth-token-file`, `Config.LogValue` writes `authToken: set|none`, never the value, and a test checks it. `/healthz`, `/readyz`, the manifest and the icon are open on purpose (`open` in `handler.go`): add a path there only if it shows no cluster data. Peers send the same token (`peer.NewClient`).
 - **`Limits` is zeroed when any container has no limit** (`podInfo`): a pod is only as limited as its least limited container. The UI then shows "% of request" instead.
 - **One brand mark.** `docs/logo.svg` (a kingfisher) is byte for byte the UI icon `static/icon.svg`; `docs/wordmark.svg` / `docs/wordmark-on-dark.svg` and the UI header's `static/wordmark.svg` (one file for both themes, its viewBox centred on the letters) draw its paths unchanged plus the name as outlines and the sparkline it perches on. `docs/logo.svg` is the master drawing (no generator): edit it, copy it to the icon, then rerun `scripts/wordmark.py` (its docstring has the pinned versions and the font); `ui_test.go` fails on any drift.
+
+- **metrics-server's `window` is not its resolution.** It is the gap between the two kubelet samples metrics-server holds (`last.Timestamp - prev.Timestamp` in its `pkg/storage`), and a scrape that brings no newer sample keeps the older one: kind's kubelets made it alternate 20 s and 10 s at a 15 s resolution. `resolutionEstimator` averages the spacing of every distinct sample seen over three minutes instead. The API serves `Timestamp` in whole seconds but `Window` to the nanosecond, so one sample seen in two lists is up to a second apart; samples less than 2 s apart are one (`sameSample`).
+- **`Expected` counts grid instants, and windows end at the newest due slot** (`Timeline.Expected`, `services.dueWindow`). `length / step + 1` claims a sample too many for any window that does not start on the grid, and the current slot is not a gap before its mid-slot poll; both made a complete history show "gaps" in the UI. All three were found by the end-to-end test on kind.
 
 ## Branch rulesets
 

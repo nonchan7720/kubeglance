@@ -62,7 +62,9 @@ func fixture(t *testing.T) (*domain.Store, *Query) {
 		})
 	}
 	q := NewQuery(s)
-	q.now = func() time.Time { return at(45) }
+	// the collector polls the slot of 45 s in its middle: from then on the
+	// window ends at 45 s (dueWindow)
+	q.now = func() time.Time { return at(45).Add(7500 * time.Millisecond) }
 	return s, q
 }
 
@@ -510,10 +512,11 @@ func TestQueryCoverageAcrossAResolutionChange(t *testing.T) {
 		s.Record(domain.Round{At: at(sec), Nodes: map[string]domain.Resource{"n1": {CPU: 1}}})
 	}
 	q := NewQuery(s)
-	q.now = func() time.Time { return at(100) }
-	// window +0..+100 at 15 s then 10 s: 0, 15, 30, 45 and 50..100 = 10
+	// at 105 s the poll of the slot of 100 s is due: the window ends there
+	q.now = func() time.Time { return at(105) }
+	// window -5..+100 at 15 s then 10 s: 0, 15, 30, 45 and 50..100 = 10
 	// samples, all present; counting the window at 10 s would say 10/11
-	u := q.Cluster(100 * time.Second).Usage
+	u := q.Cluster(105 * time.Second).Usage
 	if u.Samples != 10 || u.Expected != 10 || u.Coverage != 1 {
 		t.Errorf("usage samples %d expected %d coverage %v, want 10, 10, 1", u.Samples, u.Expected, u.Coverage)
 	}
@@ -595,5 +598,25 @@ func TestCollectorCountsErrorsAndTimesPolls(t *testing.T) {
 	c.PollOnce(context.Background())
 	if h := c.Health(); h.Rounds != 1 || h.Errors != 2 {
 		t.Errorf("after two failures: %+v", h)
+	}
+}
+
+func TestCoverageDoesNotCountASlotWhosePollIsNotDue(t *testing.T) {
+	// every slot up to 165 s has its sample; at 185 s the slot of 180 s is
+	// not polled yet (the collector polls it at 187.5 s): no gap
+	s := domain.NewStore(15*time.Second, time.Hour)
+	s.UpsertNodes([]domain.NodeInfo{{Name: "n1", Ready: true}})
+	for sec := 0; sec <= 165; sec += 15 {
+		s.Record(domain.Round{At: at(sec), Nodes: map[string]domain.Resource{"n1": {CPU: 1}}})
+	}
+	q := NewQuery(s)
+	q.now = func() time.Time { return at(185) }
+	if c := q.Cluster(3 * time.Minute).Usage; c.Coverage != 1 || c.Samples != c.Expected {
+		t.Errorf("samples/expected/coverage = %d/%d/%v, want a complete window", c.Samples, c.Expected, c.Coverage)
+	}
+	// once the poll is due and missing, it is a gap
+	q.now = func() time.Time { return at(195) }
+	if c := q.Cluster(3 * time.Minute).Usage; c.Coverage == 1 {
+		t.Errorf("coverage = 1 with the slot of 180 s due and missing (%d/%d)", c.Samples, c.Expected)
 	}
 }
