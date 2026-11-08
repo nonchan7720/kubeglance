@@ -101,7 +101,7 @@ The e2e runs in CI (job `e2e`). It cannot run in a Claude Code cloud container: 
 
 ## Branch rulesets
 
-Copied from manifold: **CI check** (required status checks `ci` and `pr-title` on `main` and `release/v*`, no deletion / force push) and **PR Approve** (one approval, squash only; bypass for admins, Renovate and the release app). `auto-approve.yaml` is what satisfies the approval for the owner's own PRs. The `pr-title` job id must not be renamed without updating the ruleset.
+Copied from manifold: **CI check** (required status checks `ci`, `pr-title` and `e2e` on `main` and `release/v*`, no deletion / force push) and **PR Approve** (one approval, squash only; bypass for admins, Renovate and the release app). `auto-approve.yaml` is what satisfies the approval for the owner's own PRs. The `pr-title` job id must not be renamed without updating the ruleset. The `e2e` job (kind) is required too (owner decision, 2026-11; added to the ruleset once the job is on `main`): the same applies to its id.
 
 ## Repository bootstrap
 
