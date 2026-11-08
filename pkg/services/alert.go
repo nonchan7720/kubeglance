@@ -94,8 +94,7 @@ func (a *Alerter) EvaluateOnce(ctx context.Context) {
 }
 
 func (a *Alerter) window(now time.Time) domain.Window {
-	d := min(a.policy.Window, a.store.Retention())
-	return domain.Window{From: now.Add(-d), To: now, Step: a.store.Interval(), Timeline: a.store.Timeline()}
+	return dueWindow(a.store, min(a.policy.Window, a.store.Retention()), now)
 }
 
 // evaluate returns a verdict for every enabled rule on every live container

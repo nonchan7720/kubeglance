@@ -56,7 +56,8 @@ var (
 // alertFixture: node n1 (allocatable 4000m / 8000), pod api (one container
 // "app", limits 1000m / 1000) and pod multi (containers "app", limit memory
 // 1000, and "proxy", no limits), five rounds at 15 s from t0 with the given
-// usage, evaluated at 60 s over one minute (5 expected samples).
+// usage, evaluated when the poll of the slot of 60 s is due (67.5 s), over
+// the minute that ends there: 0..60 s, 5 expected samples.
 func alertFixture(t *testing.T, apiMem, multiAppMem, n1CPU int64) (*domain.Store, *Alerter, *fakeNotifier, *election) {
 	t.Helper()
 	s := domain.NewStore(15*time.Second, time.Hour)
@@ -82,7 +83,7 @@ func alertFixture(t *testing.T, apiMem, multiAppMem, n1CPU int64) (*domain.Store
 	n := &fakeNotifier{}
 	e := &election{sender: true}
 	a := NewAlerter(s, n, e.elect, AlertPolicy{Window: time.Minute, Memory: 0.9, CPU: 0.9}, nil)
-	a.now = func() time.Time { return at(60) }
+	a.now = func() time.Time { return at(60).Add(7500 * time.Millisecond) }
 	return s, a, n, e
 }
 
@@ -144,7 +145,7 @@ func TestAlerterResolvesADeletedPodAsGone(t *testing.T) {
 	s, a, n, _ := alertFixture(t, 950, 500, 100)
 	a.EvaluateOnce(context.Background())
 	s.RemovePod(api, at(61))
-	a.now = func() time.Time { return at(75) }
+	a.now = func() time.Time { return at(75).Add(7500 * time.Millisecond) }
 	a.EvaluateOnce(context.Background())
 	if len(n.got) != 2 || len(n.got[1]) != 1 || n.got[1][0].Status != domain.AlertResolved || !n.got[1][0].Gone {
 		t.Errorf("calls = %+v, want a gone resolve second", n.got)
@@ -182,7 +183,7 @@ func TestAlerterFirstRoundWithPeersAssumesTheyNotified(t *testing.T) {
 			Nodes: map[string]domain.Resource{"n1": {CPU: 3900}},
 		})
 	}
-	a.now = func() time.Time { return at(105) }
+	a.now = func() time.Time { return at(105).Add(7500 * time.Millisecond) }
 	a.EvaluateOnce(context.Background())
 	if got := keys(n.sent()); len(got) != 1 || got[0] != "firing node-cpu/n1" {
 		t.Errorf("sent %v, want the new node alert only", got)
