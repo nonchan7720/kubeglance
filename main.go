@@ -23,6 +23,7 @@ import (
 	"github.com/nonchan7720/kubeglance/pkg/infrastructure/k8s"
 	"github.com/nonchan7720/kubeglance/pkg/infrastructure/peer"
 	"github.com/nonchan7720/kubeglance/pkg/infrastructure/snapshot"
+	"github.com/nonchan7720/kubeglance/pkg/infrastructure/webhook"
 	"github.com/nonchan7720/kubeglance/pkg/interfaces"
 	"github.com/nonchan7720/kubeglance/pkg/interfaces/handler"
 	"github.com/nonchan7720/kubeglance/pkg/services"
@@ -44,6 +45,20 @@ func run(ctx context.Context, c interfaces.Config, log *slog.Logger) error {
 	if limit, ok := interfaces.GoMemoryLimit(os.Getenv); ok {
 		debug.SetMemoryLimit(limit)
 		log.Info("Go memory limit set from the container's", "bytes", limit)
+	}
+
+	// the receiver is checked before anything starts: a typo in the URL or
+	// the headers stops the start-up instead of failing every alert later
+	var notifier services.Notifier
+	if c.AlertWebhook != "" {
+		wh, err := webhook.New(webhook.Settings{
+			URL: c.AlertWebhook, Format: c.AlertFormat, Headers: c.AlertHeaders, PublicURL: c.PublicURL,
+			Language: c.AlertLanguage, Window: c.AlertWindow, UserAgent: "kubeglance/" + version.Version,
+		})
+		if err != nil {
+			return err
+		}
+		notifier = wh
 	}
 
 	clients, err := k8s.NewClients(c.Kubeconfig)
@@ -105,6 +120,15 @@ func run(ctx context.Context, c interfaces.Config, log *slog.Logger) error {
 	if ctx.Err() == nil {
 		if err := watcher.Run(ctx); err != nil {
 			return err
+		}
+		if notifier != nil {
+			// every replica evaluates; the one with the lowest address among
+			// the Ready replicas sends (peer.Sender)
+			elect := func(ctx context.Context) (bool, int, error) {
+				return peer.Sender(ctx, net.DefaultResolver, c.PeerHost, c.PodIP)
+			}
+			policy := services.AlertPolicy{Window: c.AlertWindow, Memory: c.AlertMemory, CPU: c.AlertCPU}
+			go services.NewAlerter(store, notifier, elect, policy, log).Run(ctx, collector.Rounds())
 		}
 		go collector.Run(ctx)
 		go services.NewPersister(store, disk, c.SnapshotEvery, log).Run(ctx)

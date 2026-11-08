@@ -33,3 +33,16 @@ type SnapshotStore interface {
 	Save(write func(io.Writer) error) error
 	Load(read func(io.Reader) error) (ok bool, err error)
 }
+
+// Notifier delivers alerts to a receiver (a webhook). It returns how many of
+// the alerts, from the first, were delivered: a receiver that takes one
+// request per alert can fail half-way, and those already sent must not be
+// sent again.
+type Notifier interface {
+	Notify(ctx context.Context, alerts []domain.Alert) (int, error)
+}
+
+// SenderElection reports whether this replica is the one that sends
+// notifications (exactly one Ready replica is) and how many other Ready
+// replicas there are.
+type SenderElection func(ctx context.Context) (sender bool, peers int, err error)

@@ -2,6 +2,7 @@ package peer
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -123,5 +124,44 @@ func TestClientSendsTheAuthToken(t *testing.T) {
 	got = ""
 	if err := NewClient(host, port, "").Fetch(context.Background(), readInto(domain.NewStore(15*time.Second, time.Minute))); err != nil || got != "" {
 		t.Errorf("without a token: Authorization = %q (%v)", got, err)
+	}
+}
+
+func addrs(ips ...string) fakeResolver {
+	r := fakeResolver{}
+	for _, ip := range ips {
+		r.addrs = append(r.addrs, net.IPAddr{IP: net.ParseIP(ip)})
+	}
+	return r
+}
+
+func TestSenderIsTheLowestAddress(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct {
+		name   string
+		r      fakeResolver
+		self   string
+		sender bool
+		peers  int
+	}{
+		{"lowest", addrs("10.0.0.9", "10.0.0.10"), "10.0.0.9", true, 1},
+		// numeric, not string order: "10.0.0.10" < "10.0.0.9" as strings
+		{"not lowest", addrs("10.0.0.9", "10.0.0.10"), "10.0.0.10", false, 1},
+		{"not yet in the Service", addrs("10.0.0.20"), "10.0.0.9", true, 1},
+		{"alone", addrs("10.0.0.9"), "10.0.0.9", true, 0},
+		{"no endpoint", fakeResolver{err: &net.DNSError{IsNotFound: true}}, "10.0.0.9", true, 0},
+		{"own address unknown", addrs("10.0.0.1", "10.0.0.2"), "", true, 2},
+		{"ipv6", addrs("fd00::2", "fd00::1"), "fd00::2", false, 1},
+	} {
+		sender, peers, err := Sender(ctx, c.r, "kubeglance-peers", c.self)
+		if err != nil || sender != c.sender || peers != c.peers {
+			t.Errorf("%s: sender=%v peers=%d err=%v, want %v %d", c.name, sender, peers, err, c.sender, c.peers)
+		}
+	}
+	if sender, peers, err := Sender(ctx, fakeResolver{}, "", "10.0.0.1"); !sender || peers != 0 || err != nil {
+		t.Errorf("no peer host: %v %d %v, want the sender", sender, peers, err)
+	}
+	if _, _, err := Sender(ctx, fakeResolver{err: errors.New("timeout")}, "kubeglance-peers", "10.0.0.1"); err == nil {
+		t.Error("a failed lookup must be an error, not a guess")
 	}
 }

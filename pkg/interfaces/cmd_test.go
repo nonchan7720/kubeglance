@@ -44,6 +44,8 @@ func clearEnv(t *testing.T) {
 		"KUBEGLANCE_PEER_HOST", "KUBEGLANCE_PEER_PORT", "POD_IP",
 		"KUBEGLANCE_SNAPSHOT", "KUBEGLANCE_SNAPSHOT_EVERY",
 		"KUBEGLANCE_SHUTDOWN_GRACE", "KUBEGLANCE_LOG_LEVEL", "KUBEGLANCE_BOOTSTRAP_TIMEOUT", "KUBEGLANCE_AUTH_TOKEN_FILE",
+		"KUBEGLANCE_ALERT_WEBHOOK", "KUBEGLANCE_ALERT_FORMAT", "KUBEGLANCE_ALERT_HEADERS_FILE", "KUBEGLANCE_ALERT_WINDOW",
+		"KUBEGLANCE_ALERT_MEMORY", "KUBEGLANCE_ALERT_CPU", "KUBEGLANCE_ALERT_LANGUAGE", "KUBEGLANCE_PUBLIC_URL",
 	} {
 		t.Setenv(k, "")
 	}
@@ -64,6 +66,11 @@ func TestRootDefaults(t *testing.T) {
 		ShutdownGrace:    5 * time.Second,
 		LogLevel:         "info",
 		BootstrapTimeout: 2 * time.Minute,
+		AlertFormat:      "json",
+		AlertWindow:      10 * time.Minute,
+		AlertMemory:      0.9,
+		AlertCPU:         0.9,
+		AlertLanguage:    "en",
 	}
 	if c == nil || *c != want {
 		t.Fatalf("config = %+v, want %+v", c, want)
@@ -77,6 +84,8 @@ func TestRootFlags(t *testing.T) {
 		"--retention=2h", "--peer-host=peers.ns.svc", "--peer-port=9091",
 		"--pod-ip=10.0.0.7", "--snapshot=/data/s.snap", "--snapshot-every=5m",
 		"--shutdown-grace=7s", "--log-level=debug", "--bootstrap-timeout=30s",
+		"--alert-webhook=https://hooks.example.com/kubeglance", "--alert-format=pushshell", "--alert-window=5m",
+		"--alert-memory=0.8", "--alert-cpu=0", "--alert-language=ja", "--public-url=https://kubeglance.example",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -94,6 +103,13 @@ func TestRootFlags(t *testing.T) {
 		ShutdownGrace:    7 * time.Second,
 		LogLevel:         "debug",
 		BootstrapTimeout: 30 * time.Second,
+		AlertWebhook:     "https://hooks.example.com/kubeglance",
+		AlertFormat:      "pushshell",
+		AlertWindow:      5 * time.Minute,
+		AlertMemory:      0.8,
+		AlertCPU:         0,
+		AlertLanguage:    "ja",
+		PublicURL:        "https://kubeglance.example",
 	}
 	if c == nil || *c != want {
 		t.Fatalf("config = %+v, want %+v", c, want)
@@ -113,6 +129,11 @@ func TestRootEnv(t *testing.T) {
 	t.Setenv("KUBEGLANCE_SHUTDOWN_GRACE", "9s")
 	t.Setenv("KUBEGLANCE_LOG_LEVEL", "warn")
 	t.Setenv("KUBEGLANCE_BOOTSTRAP_TIMEOUT", "45s")
+	t.Setenv("KUBEGLANCE_ALERT_WEBHOOK", "http://receiver/hook")
+	t.Setenv("KUBEGLANCE_ALERT_WINDOW", "15m")
+	t.Setenv("KUBEGLANCE_ALERT_MEMORY", "0.95")
+	t.Setenv("KUBEGLANCE_ALERT_CPU", "0.85")
+	t.Setenv("KUBEGLANCE_PUBLIC_URL", "https://kg")
 	c, _, err := execute(t)
 	if err != nil {
 		t.Fatal(err)
@@ -129,6 +150,13 @@ func TestRootEnv(t *testing.T) {
 		ShutdownGrace:    9 * time.Second,
 		LogLevel:         "warn",
 		BootstrapTimeout: 45 * time.Second,
+		AlertWebhook:     "http://receiver/hook",
+		AlertFormat:      "json",
+		AlertWindow:      15 * time.Minute,
+		AlertMemory:      0.95,
+		AlertCPU:         0.85,
+		AlertLanguage:    "en",
+		PublicURL:        "https://kg",
 	}
 	if c == nil || *c != want {
 		t.Fatalf("config = %+v, want %+v", c, want)
@@ -237,6 +265,8 @@ func TestConfigLogsEveryEffectiveSetting(t *testing.T) {
 		"peerHost": "kg-peers.ns.svc", "peerPort": float64(8080), "podIP": "",
 		"snapshot": "/data/s", "snapshotEvery": "1m0s", "shutdownGrace": "5s", "logLevel": "info", "bootstrapTimeout": "2m0s",
 		"authTokenFile": "", "authToken": "none",
+		"alertWebhook": "", "alertFormat": "json", "alertHeadersFile": "", "alertHeaders": "none", "alertWindow": "10m0s",
+		"alertMemory": 0.9, "alertCPU": 0.9, "alertLanguage": "en", "publicURL": "",
 	}
 	if len(line.Config) != len(want) {
 		t.Errorf("config has %d fields, want %d: %v", len(line.Config), len(want), line.Config)
@@ -296,6 +326,38 @@ func TestAuthTokenFile(t *testing.T) {
 	var buf bytes.Buffer
 	slog.New(slog.NewJSONHandler(&buf, nil)).Info("starting", "config", *c)
 	if strings.Contains(buf.String(), "s3cret-token") || !strings.Contains(buf.String(), `"authToken":"set"`) {
+		t.Errorf("startup line = %s", buf.String())
+	}
+}
+
+func TestAlertSettingsAreValidated(t *testing.T) {
+	for _, args := range [][]string{
+		{"--alert-memory=1.5"},
+		{"--alert-cpu=-0.1"},
+		{"--alert-window=0s"},
+		{"--alert-headers-file=/nonexistent/headers"},
+	} {
+		clearEnv(t)
+		if c, _, err := execute(t, args...); err == nil || c != nil {
+			t.Errorf("%v accepted", args)
+		}
+	}
+}
+
+func TestAlertHeadersFileAndWebhookStayOutOfTheLog(t *testing.T) {
+	clearEnv(t)
+	p := filepath.Join(t.TempDir(), "headers")
+	if err := os.WriteFile(p, []byte("X-API-Key: s3cret-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// a Slack-style URL is itself the credential
+	c, _, err := execute(t, "--alert-headers-file", p, "--alert-webhook", "https://hooks.example.com/T000/s3cret-path?k=s3cret-query")
+	if err != nil || c.AlertHeaders != "X-API-Key: s3cret-key\n" {
+		t.Fatalf("headers = %q, %v", c.AlertHeaders, err)
+	}
+	var buf bytes.Buffer
+	slog.New(slog.NewJSONHandler(&buf, nil)).Info("starting", "config", *c)
+	if strings.Contains(buf.String(), "s3cret") || !strings.Contains(buf.String(), `"alertHeaders":"set"`) || !strings.Contains(buf.String(), `"alertWebhook":"https://hooks.example.com"`) {
 		t.Errorf("startup line = %s", buf.String())
 	}
 }
