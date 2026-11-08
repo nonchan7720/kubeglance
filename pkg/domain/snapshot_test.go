@@ -243,11 +243,23 @@ func TestWriteSnapshotStopsAtItsHeader(t *testing.T) {
 }
 
 func TestReadSnapshotRejectsAHeaderAfterTheSamples(t *testing.T) {
-	// every writer puts the header first; one after the samples would have
-	// been needed to slot them, so it is an error, not silently ignored
-	in := `{"pods":[],"timeline":[{"since":"0001-01-01T00:00:00Z","step":30000000000}]}`
-	if _, err := NewStore(15*time.Second, time.Minute).ReadSnapshot(strings.NewReader(in)); err == nil {
-		t.Error("no error for a timeline after the pods")
+	// every writer puts the header first ("interval" is always written);
+	// samples before it would be slotted on the wrong grid, so they are an
+	// error before anything is merged, and a header member after them too
+	p := PodKey{"app", "web"}
+	pod := `{"info":{"key":{"namespace":"app","name":"web"}},"hasInfo":true,"samples":[{"at":"2026-01-01T00:00:15Z","usage":{"cpu":1,"memory":0}}]}`
+	for name, in := range map[string]string{
+		"pods before the header":     `{"pods":[` + pod + `],"interval":30000000000}`,
+		"nodes before the header":    `{"nodes":[],"interval":30000000000}`,
+		"timeline after the samples": `{"interval":15000000000,"pods":[` + pod + `],"timeline":[{"since":"0001-01-01T00:00:00Z","step":30000000000}]}`,
+	} {
+		s := NewStore(15*time.Second, time.Minute)
+		if _, err := s.ReadSnapshot(strings.NewReader(in)); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+		if name != "timeline after the samples" && len(s.PodSamples(p, time.Time{})) != 0 {
+			t.Errorf("%s: samples merged before the error", name)
+		}
 	}
 }
 

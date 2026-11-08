@@ -118,7 +118,8 @@ func writeList[K any](w *bufio.Writer, open string, keys []K, value func(K) (any
 // pod or node is decoded and merged before the next is read, so a starting
 // replica holds one entity of the incoming history at a time, not all of it
 // twice. The timeline is merged before the first pod, from the fields
-// before it (every version writes them first). A snapshot without "newest"
+// before it (every version writes them first); samples before "interval",
+// or a header member after the samples, are an error. A snapshot without "newest"
 // places the store's current interval after takenAt instead.
 //
 // On an error, what was read so far stays merged; merging is idempotent,
@@ -148,8 +149,13 @@ func (s *Store) ReadSnapshot(r io.Reader) (SnapshotInfo, error) {
 			return info, err
 		}
 		var n int
-		if headMerged && isHeader(tok) {
+		switch {
+		case headMerged && isHeader(tok):
 			return info, fmt.Errorf("snapshot %v after its samples", tok)
+		case (tok == "pods" || tok == "nodes") && head.Interval <= 0:
+			// every version writes "interval" before the samples; without
+			// it they would be slotted on this store's grid, not the peer's
+			return info, fmt.Errorf("snapshot %v before its interval", tok)
 		}
 		switch tok {
 		case "takenAt":
