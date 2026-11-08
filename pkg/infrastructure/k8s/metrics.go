@@ -73,7 +73,8 @@ const resolutionSpan = 3 * time.Minute
 // --metric-resolution, how often a new value arrives) from what it reports.
 //
 // A NodeMetrics carries the timestamps of the two kubelet samples
-// metrics-server holds: Timestamp and Timestamp - Window. Window is not the
+// metrics-server holds: Timestamp and Timestamp - Window (to within a
+// second, see sameSample). Window is not the
 // resolution: when a scrape brings no newer kubelet sample, metrics-server
 // keeps the older one, and with kubelets that sample every 10 s, scrapes
 // every 15 s report windows of 20 s and 10 s, never 15 s (seen on kind).
@@ -135,10 +136,18 @@ func (e *resolutionEstimator) observe(nodes *metricsv1beta1.NodeMetricsList) tim
 	return estimates[len(estimates)/2].Round(time.Second)
 }
 
-// insert adds t to the sorted pts unless it is there.
+// sameSample is how close two timestamps are when they are one kubelet
+// sample seen twice: the API serves Timestamp in whole seconds (metav1.Time)
+// but Window to the nanosecond, so Timestamp - Window of one list is up to a
+// second off the Timestamp an earlier list showed for the same sample.
+// Distinct samples metrics-server keeps are at least its minimum resolution
+// (10 s) apart.
+const sameSample = 2 * time.Second
+
+// insert adds t to the sorted pts unless a sample within sameSample is there.
 func insert(pts []time.Time, t time.Time) []time.Time {
-	i, found := slices.BinarySearchFunc(pts, t, func(a, b time.Time) int { return a.Compare(b) })
-	if found {
+	i, _ := slices.BinarySearchFunc(pts, t, func(a, b time.Time) int { return a.Compare(b) })
+	if (i > 0 && t.Sub(pts[i-1]) < sameSample) || (i < len(pts) && pts[i].Sub(t) < sameSample) {
 		return pts
 	}
 	return slices.Insert(pts, i, t)

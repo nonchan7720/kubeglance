@@ -37,15 +37,24 @@ func sec(s float64) time.Time { return t0.Add(time.Duration(s * float64(time.Sec
 // the gap back to the previous one metrics-server kept (metrics-server
 // pkg/storage: Window = last.Timestamp - prev.Timestamp). The previous point
 // is replaced only when a scrape brings a newer sample.
+//
+// Kubelet samples are taken at fractions of a second (0.1 s to 0.9 s past
+// the grid, varying), and the API serves Timestamp in whole seconds
+// (metav1.Time) but Window to the nanosecond, so Timestamp - Window is not
+// exactly a Timestamp an earlier list showed.
 func scraped(name string, now float64, scrapeEvery, sampleEvery float64) metricsv1beta1.NodeMetrics {
 	var last, prev float64 = -1, -1
 	for s := 0.0; s <= now; s += scrapeEvery {
-		ts := float64(int(s/sampleEvery)) * sampleEvery
+		k := float64(int(s / sampleEvery))
+		ts := k*sampleEvery + 0.1 + float64(int(k)%9)/10
+		if ts > s {
+			ts -= sampleEvery // not taken yet at this scrape
+		}
 		if ts > last {
 			prev, last = last, ts
 		}
 	}
-	n := metricsv1beta1.NodeMetrics{ObjectMeta: metav1.ObjectMeta{Name: name}, Timestamp: metav1.NewTime(sec(last))}
+	n := metricsv1beta1.NodeMetrics{ObjectMeta: metav1.ObjectMeta{Name: name}, Timestamp: metav1.NewTime(sec(last).Truncate(time.Second))}
 	if prev >= 0 {
 		n.Window = metav1.Duration{Duration: sec(last).Sub(sec(prev))}
 	}
@@ -58,13 +67,19 @@ func list(nodes ...metricsv1beta1.NodeMetrics) *metricsv1beta1.NodeMetricsList {
 
 func TestWindowIsNotTheResolution(t *testing.T) {
 	// the premise of the estimator, as seen on kind: scrapes every 15 s of
-	// kubelet samples taken every 10 s report windows of 20 s and 10 s
+	// kubelet samples taken every 10 s report windows of about 20 s and
+	// 10 s (the first scrape has no window yet: 0)
 	got := map[time.Duration]bool{}
 	for now := 15.0; now <= 120; now += 15 {
-		got[scraped("n1", now, 15, 10).Window.Duration] = true
+		got[scraped("n1", now, 15, 10).Window.Round(time.Second)] = true
 	}
-	if !got[20*time.Second] || !got[10*time.Second] || got[15*time.Second] {
-		t.Errorf("windows seen = %v, want 10s and 20s, never 15s", got)
+	for w := range got {
+		if w >= 14*time.Second && w <= 16*time.Second {
+			t.Errorf("window %v seen: the premise is that windows are not the resolution", w)
+		}
+	}
+	if !got[20*time.Second] {
+		t.Errorf("windows seen = %v, want one of 20s", got)
 	}
 }
 
@@ -96,15 +111,17 @@ func TestResolutionIsTheSpacingOfTheSamplesSeen(t *testing.T) {
 }
 
 func TestResolutionNeedsTwoGaps(t *testing.T) {
+	// the kubelet samples of scraped(15, 10) are at 10.2 s, 20.4 s, 40.5 s:
+	// the list at 15 s shows one, the list at 30 s two (one gap), and only
+	// the list at 45 s a second gap: (40 - 10) / 2
 	var e resolutionEstimator
-	// one list shows two samples of a node, one gap: 20 s could be a whole
-	// resolution or a long and a short one
-	if got := e.observe(list(scraped("n1", 15, 15, 10))); got != 0 {
-		t.Errorf("after one list: %v, want 0 (unknown)", got)
+	for _, now := range []float64{15, 30} {
+		if got := e.observe(list(scraped("n1", now, 15, 10))); got != 0 {
+			t.Errorf("after the list at %v s: %v, want 0 (unknown)", now, got)
+		}
 	}
-	// the next scrape adds a third sample: (30 - 0) / 2
-	if got := e.observe(list(scraped("n1", 30, 15, 10))); got != 15*time.Second {
-		t.Errorf("after a new scrape: %v, want 15s", got)
+	if got := e.observe(list(scraped("n1", 45, 15, 10))); got != 15*time.Second {
+		t.Errorf("after the list at 45 s: %v, want 15s", got)
 	}
 }
 
@@ -126,6 +143,19 @@ func TestResolutionForgetsOldSamples(t *testing.T) {
 	}
 }
 
+func TestOneSampleSeenTwiceIsOnePoint(t *testing.T) {
+	// the sample at 10.6 s: Timestamp 10 s in one list, 30 s - 19.8 s =
+	// 10.2 s in the next (the later sample is at 30.4 s)
+	var e resolutionEstimator
+	e.observe(list(metricsv1beta1.NodeMetrics{ObjectMeta: metav1.ObjectMeta{Name: "n1"}, Timestamp: metav1.NewTime(sec(10)),
+		Window: metav1.Duration{Duration: 10600 * time.Millisecond}}))
+	e.observe(list(metricsv1beta1.NodeMetrics{ObjectMeta: metav1.ObjectMeta{Name: "n1"}, Timestamp: metav1.NewTime(sec(30)),
+		Window: metav1.Duration{Duration: 19800 * time.Millisecond}}))
+	if got := len(e.points["n1"]); got != 3 {
+		t.Errorf("points = %v, want 3 (0, 10, 30)", e.points["n1"])
+	}
+}
+
 func TestResolutionIsTheMedianOverNodes(t *testing.T) {
 	// n3's kubelet missed scrapes: its samples are 30 s apart
 	var e resolutionEstimator
@@ -140,7 +170,7 @@ func TestResolutionIsTheMedianOverNodes(t *testing.T) {
 
 func TestPollReportsTheResolution(t *testing.T) {
 	cs := metricsfake.NewSimpleClientset()
-	now := 15.0
+	var now float64
 	cs.PrependReactor("list", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, list(scraped("n1", now, 15, 10)), nil
 	})
@@ -148,11 +178,14 @@ func TestPollReportsTheResolution(t *testing.T) {
 		return true, &metricsv1beta1.PodMetricsList{}, nil
 	})
 	src := NewMetricsSource(cs)
-	// start-up: not known from one list
-	if _, err := src.Resolution(context.Background()); err == nil {
-		t.Error("resolution from a single list: want an error (not known yet)")
+	// start-up: not known while the lists show one gap (see
+	// TestResolutionNeedsTwoGaps)
+	for _, now = range []float64{15, 30} {
+		if _, err := src.Resolution(context.Background()); err == nil {
+			t.Errorf("resolution after the list at %v s: want an error (not known yet)", now)
+		}
 	}
-	now = 30
+	now = 45
 	r, err := src.Poll(context.Background())
 	if err != nil {
 		t.Fatal(err)
