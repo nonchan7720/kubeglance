@@ -283,3 +283,18 @@ func TestContainerSeriesAreSlottedToo(t *testing.T) {
 		t.Errorf("merged container samples = %v, want one per slot at +0, +15", got)
 	}
 }
+
+func TestStoreSize(t *testing.T) {
+	s := newTestStore() // capacity 5
+	p, q := PodKey{"app", "a"}, PodKey{"app", "b"}
+	for i := range 3 {
+		s.Record(Round{At: at(i * 15), Pods: map[PodKey]Resource{p: {CPU: 1}, q: {CPU: 1}}, Nodes: map[string]Resource{"n1": {CPU: 1}},
+			Containers: map[PodKey]map[string]Resource{p: {"app": {CPU: 1}, "proxy": {CPU: 1}}}})
+	}
+	got := s.Size()
+	// 2 pod + 1 node + 2 container series, 3 samples each
+	want := StoreSize{Pods: 2, Nodes: 1, Series: 5, Samples: 15, Capacity: 5}
+	if got != want {
+		t.Errorf("Size = %+v, want %+v", got, want)
+	}
+}

@@ -4,8 +4,10 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -196,5 +198,67 @@ func TestAcceptsGzip(t *testing.T) {
 		if got := acceptsGzip(header); got != want {
 			t.Errorf("acceptsGzip(%q) = %v, want %v", header, got, want)
 		}
+	}
+}
+
+func TestMetricsEndpoint(t *testing.T) {
+	srv, col := newServer(t)
+	col.PollOnce(context.Background())
+	resp, err := http.Get(srv.URL + "/metrics") //nolint:gosec // test server URL
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // test
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "text/plain; version=0.0.4; charset=utf-8" {
+		t.Fatalf("%d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	body, _ := io.ReadAll(resp.Body)
+
+	// every sample line belongs to a metric announced by # HELP and # TYPE,
+	// and has a numeric value (the text exposition format)
+	sample := regexp.MustCompile(`^([a-z_]+)(\{[a-z_]+="[^"]*"(,[a-z_]+="[^"]*")*\})? (-?[0-9.e+-]+|NaN|\+Inf)$`)
+	typed := map[string]string{}
+	values := map[string]string{}
+	for line := range strings.SplitSeq(strings.TrimRight(string(body), "\n"), "\n") {
+		switch {
+		case strings.HasPrefix(line, "# HELP "):
+		case strings.HasPrefix(line, "# TYPE "):
+			f := strings.Fields(line)
+			typed[f[2]] = f[3]
+		default:
+			m := sample.FindStringSubmatch(line)
+			if m == nil {
+				t.Errorf("not a sample line: %q", line)
+				continue
+			}
+			if _, ok := typed[m[1]]; !ok {
+				t.Errorf("%s has no # TYPE before it", m[1])
+			}
+			values[m[1]+m[2]] = m[4]
+		}
+	}
+	for k, want := range map[string]string{
+		`kubeglance_build_info{version="test"}`: "1",
+		"kubeglance_poll_rounds_total":          "1",
+		"kubeglance_poll_errors_total":          "0",
+		"kubeglance_poll_interval_seconds":      "15",
+		"kubeglance_store_pods":                 "1",
+		"kubeglance_store_nodes":                "1",
+		"kubeglance_store_series":               "2",
+		"kubeglance_store_samples":              "2",
+		"kubeglance_store_series_capacity":      "241",
+		"kubeglance_ready":                      "1",
+	} {
+		if values[k] != want {
+			t.Errorf("%s = %q, want %s", k, values[k], want)
+		}
+	}
+	for _, k := range []string{"kubeglance_poll_last_duration_seconds", "kubeglance_poll_last_success_timestamp_seconds"} {
+		if _, ok := values[k]; !ok {
+			t.Errorf("%s missing", k)
+		}
+	}
+	if typed["kubeglance_poll_rounds_total"] != "counter" || typed["kubeglance_store_samples"] != "gauge" {
+		t.Errorf("types = %v", typed)
 	}
 }

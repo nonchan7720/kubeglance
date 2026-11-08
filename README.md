@@ -73,7 +73,8 @@ Everything the UI shows is JSON under `/api/v1`, with `?window=30m` (default) on
 | `GET /api/v1/pods?namespace=&node=&workload=ns/Kind/name` | per pod: usage stats, usage/limit and usage/request ratios; pods gone during the window are included and flagged |
 | `GET /api/v1/pods/{namespace}/{name}` | one pod and each of its containers (spec order): usage stats against the container's own requests and limits; 404 when the pod is not in history |
 | `GET /api/v1/status` | version, interval, retention, collector health |
-| `GET /healthz`, `GET /readyz` | liveness; readiness once the first round is collected |
+| `GET /healthz`, `GET /readyz` | liveness; readiness once the peer copy is done and the first round is collected |
+| `GET /metrics` | kubeglance's own metrics for Prometheus: polls, poll errors and duration, last success, current interval, history size (pods, nodes, series, samples, capacity). With `networkPolicy.enabled`, add your Prometheus to `networkPolicy.ingressFrom` |
 | `GET /internal/snapshot` | the whole history (what peers copy) |
 
 Statistics are computed from raw samples, never from averages of averages. `coverage` on every stats object is the fraction of the window that has samples; the UI shows gaps instead of silently shrinking the window.

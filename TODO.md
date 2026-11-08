@@ -35,7 +35,7 @@ A Claude Code cloud container cannot do this part: `dockerd` starts and the k3s 
 ## 3. Operations
 
 - [ ] Optional **basic auth / bearer token** flag for people who expose it without a tunnel (default off; document that Tailscale / Cloudflare Access is the recommended way).
-- [ ] `/metrics` Prometheus endpoint for kubeglance itself (poll duration, rounds, store size) — small, and expected in the Landscape's Monitoring category.
+- [x] `/metrics` Prometheus endpoint for kubeglance itself (poll duration, rounds, errors, interval, store size), written in the text format by hand (no metrics library).
 - [x] PodDisruptionBudget (`minAvailable: 1`) in the chart when `replicaCount > 1`.
 - [x] NetworkPolicy template (ingress from the replicas + `networkPolicy.ingressFrom`; egress to DNS, the API server and the replicas). Off by default. `charts/tests/render.sh` checks the renders; it has not been applied to a real CNI yet, see §0.
 - [x] Structured startup log line that prints the effective config (`starting` → `config`; a test fails when a `Config` field is not logged).
