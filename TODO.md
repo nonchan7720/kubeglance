@@ -34,7 +34,7 @@ A Claude Code cloud container cannot do this part: `dockerd` starts and the k3s 
 
 ## 3. Operations
 
-- [ ] Optional **basic auth / bearer token** flag for people who expose it without a tunnel (default off; document that Tailscale / Cloudflare Access is the recommended way).
+- [x] Optional **basic auth / bearer token** for people who expose it without a tunnel: `--auth-token-file` / chart `auth.existingSecret`, default off; README "Access" says Tailscale / Cloudflare Access is the recommended way.
 - [x] `/metrics` Prometheus endpoint for kubeglance itself (poll duration, rounds, errors, interval, store size), written in the text format by hand (no metrics library).
 - [x] PodDisruptionBudget (`minAvailable: 1`) in the chart when `replicaCount > 1`.
 - [x] NetworkPolicy template (ingress from the replicas + `networkPolicy.ingressFrom`; egress to DNS, the API server and the replicas). Off by default. `charts/tests/render.sh` checks the renders; it has not been applied to a real CNI yet, see §0.
@@ -54,7 +54,7 @@ Entry criteria (checked 2026-11): ~300 GitHub stars, fits an existing category (
 
 ## Known limitations (document, maybe never fix)
 
-- No authentication built in (by design for v0; see 3).
+- Authentication is one shared token (optional, see 3), not users or roles: put an identity-aware proxy in front for that.
 - Pods with no limits show "% of request"; pods with neither show raw numbers only.
 - metrics-server's own ~15 s staleness means "now" is up to ~30 s old.
 - With `replicaCount: 1`, a restart loses the history unless `snapshot.enabled`.

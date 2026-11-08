@@ -22,6 +22,11 @@ func (s staticSource) Poll(context.Context) (domain.Round, error) { return s.rou
 
 func newServer(t *testing.T) (*httptest.Server, *services.Collector) {
 	t.Helper()
+	return newServerWith(t, "")
+}
+
+func newServerWith(t *testing.T, token string) (*httptest.Server, *services.Collector) {
+	t.Helper()
 	store := domain.NewStore(15*time.Second, time.Hour)
 	key := domain.PodKey{Namespace: "app", Name: "web-1"}
 	store.UpsertNodes([]domain.NodeInfo{{Name: "n1", Ready: true, Allocatable: domain.Resource{CPU: 4000, Memory: 1 << 30}}})
@@ -32,7 +37,7 @@ func newServer(t *testing.T) (*httptest.Server, *services.Collector) {
 		Pods:  map[domain.PodKey]domain.Resource{key: {CPU: 100, Memory: 1 << 20}},
 		Nodes: map[string]domain.Resource{"n1": {CPU: 1000, Memory: 1 << 28}},
 	}}, nil)
-	h := New(Deps{Store: store, Query: services.NewQuery(store), Collector: col, Version: "test"})
+	h := New(Deps{Store: store, Query: services.NewQuery(store), Collector: col, Version: "test", AuthToken: token})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	return srv, col
@@ -260,5 +265,58 @@ func TestMetricsEndpoint(t *testing.T) {
 	}
 	if typed["kubeglance_poll_rounds_total"] != "counter" || typed["kubeglance_store_samples"] != "gauge" {
 		t.Errorf("types = %v", typed)
+	}
+}
+
+func TestAuthToken(t *testing.T) {
+	const token = "s3cret-token"
+	srv, col := newServerWith(t, token)
+	col.PollOnce(context.Background())
+	do := func(path string, set func(*http.Request)) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		if set != nil {
+			set(req)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp
+	}
+	basic := func(user, pass string) func(*http.Request) {
+		return func(r *http.Request) { r.SetBasicAuth(user, pass) }
+	}
+	bearer := func(tok string) func(*http.Request) {
+		return func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+tok) }
+	}
+
+	for _, path := range []string{"/", "/app.js", "/api/v1/status", "/api/v1/pods", "/metrics", "/internal/snapshot"} {
+		resp := do(path, nil)
+		if resp.StatusCode != http.StatusUnauthorized || !strings.HasPrefix(resp.Header.Get("WWW-Authenticate"), `Basic realm="kubeglance"`) {
+			t.Errorf("%s without credentials: %d %q", path, resp.StatusCode, resp.Header.Get("WWW-Authenticate"))
+		}
+		if r := do(path, basic("anyone", token)); r.StatusCode != http.StatusOK {
+			t.Errorf("%s with basic auth: %d", path, r.StatusCode)
+		}
+		if r := do(path, bearer(token)); r.StatusCode != http.StatusOK {
+			t.Errorf("%s with a bearer token: %d", path, r.StatusCode)
+		}
+		for name, set := range map[string]func(*http.Request){
+			"wrong password": basic("anyone", "nope"), "wrong bearer": bearer("nope"),
+			"prefix of the token": bearer(token[:5]), "token plus more": bearer(token + "x"),
+		} {
+			if r := do(path, set); r.StatusCode != http.StatusUnauthorized {
+				t.Errorf("%s with %s: %d", path, name, r.StatusCode)
+			}
+		}
+	}
+	// the kubelet's probes and what a browser fetches without credentials
+	// when adding the app to the home screen stay open
+	for _, path := range []string{"/healthz", "/readyz", "/manifest.webmanifest", "/icon.svg"} {
+		if r := do(path, nil); r.StatusCode != http.StatusOK {
+			t.Errorf("%s without credentials: %d, want 200", path, r.StatusCode)
+		}
 	}
 }

@@ -38,6 +38,16 @@ snapshot:
     size: 256Mi
     accessMode: ReadWriteOnce
 
+# Optional token on the UI, the API and /metrics (Basic auth password with
+# any user name, or a Bearer token). Off by default: the recommended way is to
+# keep kubeglance off the internet and reach it through Tailscale, Cloudflare
+# Access or an authenticating Ingress. Name a Secret you created yourself;
+# the chart never takes the token as a value:
+#   kubectl -n kubeglance create secret generic kubeglance-auth --from-literal=token=$(openssl rand -hex 24)
+auth:
+  existingSecret: ""
+  key: token
+
 service:
   type: ClusterIP
   port: 80

@@ -48,6 +48,9 @@ spec:
             - --snapshot=/data/kubeglance.snap
             - --snapshot-every={{ .Values.snapshot.every }}
             {{- end }}
+            {{- if .Values.auth.existingSecret }}
+            - --auth-token-file=/etc/kubeglance/auth/token
+            {{- end }}
           env:
             - name: POD_IP
               valueFrom:
@@ -80,13 +83,21 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if .Values.snapshot.enabled }}
+          {{- if or .Values.snapshot.enabled .Values.auth.existingSecret }}
           volumeMounts:
+            {{- if .Values.snapshot.enabled }}
             - name: data
               mountPath: /data
+            {{- end }}
+            {{- if .Values.auth.existingSecret }}
+            - name: auth
+              mountPath: /etc/kubeglance/auth
+              readOnly: true
+            {{- end }}
           {{- end }}
-      {{- if .Values.snapshot.enabled }}
+      {{- if or .Values.snapshot.enabled .Values.auth.existingSecret }}
       volumes:
+        {{- if .Values.snapshot.enabled }}
         - name: data
           {{- if .Values.snapshot.persistence.enabled }}
           persistentVolumeClaim:
@@ -94,6 +105,15 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- end }}
+        {{- if .Values.auth.existingSecret }}
+        - name: auth
+          secret:
+            secretName: {{ .Values.auth.existingSecret }}
+            items:
+              - key: {{ .Values.auth.key }}
+                path: token
+        {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

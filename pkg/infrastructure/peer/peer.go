@@ -21,15 +21,19 @@ const SnapshotPath = "/internal/snapshot"
 
 // Client fetches a snapshot from one replica.
 type Client struct {
-	url  string
-	http *http.Client
+	url   string
+	token string
+	http  *http.Client
 }
 
-// NewClient returns a client for the replica at host:port.
-func NewClient(host string, port int) *Client {
+// NewClient returns a client for the replica at host:port. A non-empty
+// token (--auth-token-file, shared by the replicas) is sent as a Bearer
+// token, since every replica requires it on /internal/snapshot.
+func NewClient(host string, port int, token string) *Client {
 	return &Client{
-		url:  "http://" + net.JoinHostPort(host, strconv.Itoa(port)) + SnapshotPath,
-		http: &http.Client{Timeout: 10 * time.Second},
+		url:   "http://" + net.JoinHostPort(host, strconv.Itoa(port)) + SnapshotPath,
+		token: token,
+		http:  &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -40,6 +44,9 @@ func (c *Client) Fetch(ctx context.Context) (domain.Snapshot, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url, nil)
 	if err != nil {
 		return domain.Snapshot{}, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -66,7 +73,7 @@ type Resolver interface {
 // replica install has no peers. Resolution failure returns an error only when
 // the host is set; a headless Service with no other ready endpoint resolves
 // to nothing, which is not an error.
-func Discover(ctx context.Context, r Resolver, host string, port int, self string) ([]*Client, error) {
+func Discover(ctx context.Context, r Resolver, host string, port int, self, token string) ([]*Client, error) {
 	if host == "" {
 		return nil, nil
 	}
@@ -84,7 +91,7 @@ func Discover(ctx context.Context, r Resolver, host string, port int, self strin
 		if ip == self {
 			continue
 		}
-		peers = append(peers, NewClient(ip, port))
+		peers = append(peers, NewClient(ip, port, token))
 	}
 	return peers, nil
 }

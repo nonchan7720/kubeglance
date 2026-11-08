@@ -40,6 +40,17 @@ With two replicas the chart also renders a PodDisruptionBudget (`minAvailable: 1
 
 The first log line, `starting`, carries the effective configuration (flags, environment and defaults combined) as a `config` object.
 
+### Access
+
+kubeglance shows what runs in your cluster, so keep it off the open internet: reach it through Tailscale, Cloudflare Access or an authenticating Ingress. If you cannot, give it a token:
+
+```bash
+kubectl -n kubeglance create secret generic kubeglance-auth --from-literal=token="$(openssl rand -hex 24)"
+helm upgrade kubeglance oci://ghcr.io/nonchan7720/charts/kubeglance -n kubeglance --reuse-values --set auth.existingSecret=kubeglance-auth
+```
+
+The browser then asks for a user name (anything) and a password (the token) once. API clients and Prometheus can send `Authorization: Bearer <token>`. `/healthz`, `/readyz`, the web manifest and the icon stay open for the probes and for adding the app to a home screen. The replicas send the token to each other for the history copy. The token is read from a file (the mounted Secret), never from a flag, and the startup log only says whether one is set.
+
 Binaries for linux / darwin / windows (amd64, arm64, armv7) are on [Releases](https://github.com/nonchan7720/kubeglance/releases); run `kubeglance --kubeconfig ~/.kube/config` outside the cluster.
 
 ## Configuration
@@ -58,6 +69,7 @@ Flags, or the environment variable in brackets; a flag on the command line wins 
 | `--snapshot-every` (`KUBEGLANCE_SNAPSHOT_EVERY`) | `1m` | how often to write it |
 | `--shutdown-grace` (`KUBEGLANCE_SHUTDOWN_GRACE`) | `5s` | keep serving after SIGTERM so a new replica can finish copying |
 | `--bootstrap-timeout` (`KUBEGLANCE_BOOTSTRAP_TIMEOUT`) | `2m` | how long a starting replica retries copying the history while peers exist but none answers; it is not Ready meanwhile |
+| `--auth-token-file` (`KUBEGLANCE_AUTH_TOKEN_FILE`) | | file with a token required on the UI, the API, `/metrics` and the peer copy; off when empty. See [Access](#access) |
 | `--kubeconfig` | | out-of-cluster; else in-cluster, `$KUBECONFIG`, `~/.kube/config` |
 | `--log-level` (`KUBEGLANCE_LOG_LEVEL`) | `info` | `debug` / `info` / `warn` / `error` (JSON to stderr) |
 

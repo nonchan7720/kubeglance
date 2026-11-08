@@ -5,6 +5,7 @@ package handler
 
 import (
 	"compress/gzip"
+	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -24,6 +25,10 @@ type Deps struct {
 	Collector *services.Collector
 	Version   string
 	Log       *slog.Logger
+	// AuthToken, when set, is required on everything but the probes and the
+	// PWA manifest / icon: as the Basic auth password (any user name; a
+	// phone's browser asks once and remembers) or as a Bearer token.
+	AuthToken string
 }
 
 // New returns the router.
@@ -56,8 +61,32 @@ func (h *handler) wrap(next http.Handler) http.Handler {
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/internal/") {
 			w.Header().Set("Cache-Control", "no-store")
 		}
+		if h.AuthToken != "" && !open[r.URL.Path] && !h.authorized(r) {
+			w.Header().Set("WWW-Authenticate", `Basic realm="kubeglance", charset="UTF-8"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// open are the paths served without the token: the kubelet's probes, and
+// what a browser fetches without credentials when the app is added to the
+// home screen. None of them shows cluster data.
+var open = map[string]bool{"/healthz": true, "/readyz": true, "/manifest.webmanifest": true, "/icon.svg": true}
+
+// authorized reports whether the request carries the token, as the Basic
+// password or a Bearer token, compared in constant time.
+func (h *handler) authorized(r *http.Request) bool {
+	var got string
+	if _, pass, ok := r.BasicAuth(); ok {
+		got = pass
+	} else if tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+		got = tok
+	} else {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(h.AuthToken)) == 1
 }
 
 // window parses ?window=30m (default 30m). Anything unparsable is 30m.

@@ -28,7 +28,7 @@ func TestClientFetch(t *testing.T) {
 	host, portStr, _ := net.SplitHostPort(srv.Listener.Addr().String())
 	port, _ := strconv.Atoi(portStr)
 
-	snap, err := NewClient(host, port).Fetch(context.Background())
+	snap, err := NewClient(host, port, "").Fetch(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestClientFetchNon200(t *testing.T) {
 	defer srv.Close()
 	host, portStr, _ := net.SplitHostPort(srv.Listener.Addr().String())
 	port, _ := strconv.Atoi(portStr)
-	if _, err := NewClient(host, port).Fetch(context.Background()); err == nil {
+	if _, err := NewClient(host, port, "").Fetch(context.Background()); err == nil {
 		t.Error("expected error on 503")
 	}
 }
@@ -58,7 +58,7 @@ func (f fakeResolver) LookupIPAddr(context.Context, string) ([]net.IPAddr, error
 
 func TestDiscoverExcludesSelf(t *testing.T) {
 	r := fakeResolver{addrs: []net.IPAddr{{IP: net.ParseIP("10.0.0.1")}, {IP: net.ParseIP("10.0.0.2")}}}
-	peers, err := Discover(context.Background(), r, "kubeglance-headless", 8080, "10.0.0.1")
+	peers, err := Discover(context.Background(), r, "kubeglance-headless", 8080, "10.0.0.1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestDiscoverExcludesSelf(t *testing.T) {
 }
 
 func TestDiscoverNoHostNoPeers(t *testing.T) {
-	peers, err := Discover(context.Background(), fakeResolver{}, "", 8080, "")
+	peers, err := Discover(context.Background(), fakeResolver{}, "", 8080, "", "")
 	if err != nil || peers != nil {
 		t.Errorf("peers=%v err=%v", peers, err)
 	}
@@ -76,8 +76,35 @@ func TestDiscoverNoHostNoPeers(t *testing.T) {
 
 func TestDiscoverNotFoundIsEmpty(t *testing.T) {
 	r := fakeResolver{err: &net.DNSError{IsNotFound: true}}
-	peers, err := Discover(context.Background(), r, "x", 8080, "")
+	peers, err := Discover(context.Background(), r, "x", 8080, "", "")
 	if err != nil || len(peers) != 0 {
 		t.Errorf("peers=%v err=%v", peers, err)
+	}
+}
+
+func TestClientSendsTheAuthToken(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		_ = json.NewEncoder(w).Encode(domain.Snapshot{})
+	}))
+	defer srv.Close()
+	host, portStr, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	port, _ := strconv.Atoi(portStr)
+
+	r := fakeResolver{addrs: []net.IPAddr{{IP: net.ParseIP(host)}}}
+	peers, err := Discover(context.Background(), r, "peers", port, "", "s3cret")
+	if err != nil || len(peers) != 1 {
+		t.Fatalf("peers = %v, %v", peers, err)
+	}
+	if _, err := peers[0].Fetch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got != "Bearer s3cret" {
+		t.Errorf("Authorization = %q, want the replicas' shared token", got)
+	}
+	got = ""
+	if _, err := NewClient(host, port, "").Fetch(context.Background()); err != nil || got != "" {
+		t.Errorf("without a token: Authorization = %q (%v)", got, err)
 	}
 }
