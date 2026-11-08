@@ -42,7 +42,7 @@ func ComputeStats(in []Sample, w Window) Stats {
 	case len(w.Timeline) > 0 && w.To.After(w.From):
 		st.Expected = w.Timeline.Expected(w.From, w.To)
 	case w.Step > 0 && w.To.After(w.From):
-		st.Expected = int(w.To.Sub(w.From)/w.Step) + 1
+		st.Expected = gridInstants(w.From, w.To, w.Step, true)
 	}
 	if st.Expected > 0 {
 		st.Coverage = min(1, float64(len(in))/float64(st.Expected))
