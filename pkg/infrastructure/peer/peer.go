@@ -5,15 +5,13 @@ package peer
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strconv"
 	"time"
-
-	"github.com/nonchan7720/kubeglance/pkg/domain"
 )
 
 // SnapshotPath is where every replica serves its history.
@@ -39,28 +37,28 @@ func NewClient(host string, port int, token string) *Client {
 
 func (c *Client) String() string { return c.url }
 
-// Fetch implements services.PeerSource.
-func (c *Client) Fetch(ctx context.Context) (domain.Snapshot, error) {
+// Fetch implements services.PeerSource: read gets the response body as it
+// arrives (decompressed; the transport asks for gzip).
+func (c *Client) Fetch(ctx context.Context, read func(io.Reader) error) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url, nil)
 	if err != nil {
-		return domain.Snapshot{}, err
+		return err
 	}
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return domain.Snapshot{}, err
+		return err
 	}
 	defer resp.Body.Close() //nolint:errcheck // nothing to do with a close error on a read
 	if resp.StatusCode != http.StatusOK {
-		return domain.Snapshot{}, fmt.Errorf("%s: %s", c.url, resp.Status)
+		return fmt.Errorf("%s: %s", c.url, resp.Status)
 	}
-	var snap domain.Snapshot
-	if err := json.NewDecoder(resp.Body).Decode(&snap); err != nil {
-		return domain.Snapshot{}, fmt.Errorf("%s: decode: %w", c.url, err)
+	if err := read(resp.Body); err != nil {
+		return fmt.Errorf("%s: %w", c.url, err)
 	}
-	return snap, nil
+	return nil
 }
 
 // Resolver looks up the addresses behind a host name (the headless Service).

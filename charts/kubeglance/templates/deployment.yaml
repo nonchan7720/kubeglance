@@ -56,6 +56,13 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
+            # the memory limit in bytes: the Go runtime keeps its heap under
+            # 90 % of it (garbage would otherwise grow past it during a peer
+            # copy); without a limit this is the node's allocatable memory
+            - name: KUBEGLANCE_MEMORY_LIMIT
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.memory
           ports:
             - name: http
               containerPort: 8080

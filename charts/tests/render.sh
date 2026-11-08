@@ -52,6 +52,11 @@ out=$(doc Deployment --set auth.existingSecret=kg-auth --set snapshot.enabled=tr
 contains "$out" "mountPath: /data" "auth + snapshot: data mount"
 contains "$out" "mountPath: /etc/kubeglance/auth" "auth + snapshot: auth mount"
 
+# the Go runtime learns the container's memory limit (downward API)
+out=$(doc Deployment)
+contains "$out" "name: KUBEGLANCE_MEMORY_LIMIT" "memory limit env"
+contains "$out" "resource: limits.memory" "memory limit from the downward API"
+
 # every combination above also lints
 for set in "" "--set replicaCount=1" "--set networkPolicy.enabled=true" "--set auth.existingSecret=kg-auth --set snapshot.enabled=true"; do
   # shellcheck disable=SC2086 # word splitting is the point

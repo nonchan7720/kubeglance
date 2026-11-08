@@ -103,6 +103,12 @@ func window(r *http.Request) time.Duration {
 // phone's connection. Peers fetching /internal/snapshot get the same, and
 // Go's client decompresses it transparently.
 func (h *handler) writeJSON(w http.ResponseWriter, r *http.Request, v any) {
+	h.write(w, r, func(out io.Writer) error { return json.NewEncoder(out).Encode(v) })
+}
+
+// write sends a JSON body that body writes, gzip-compressed when the client
+// accepts it.
+func (h *handler) write(w http.ResponseWriter, r *http.Request, body func(io.Writer) error) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Add("Vary", "Accept-Encoding")
 	var out io.Writer = w
@@ -116,7 +122,7 @@ func (h *handler) writeJSON(w http.ResponseWriter, r *http.Request, v any) {
 		}()
 		out = zw
 	}
-	if err := json.NewEncoder(out).Encode(v); err != nil {
+	if err := body(out); err != nil {
 		h.Log.Debug("write response", "err", err)
 	}
 }
@@ -188,8 +194,10 @@ func (h *handler) status(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// snapshot streams the history to a starting peer (Store.WriteSnapshot): a
+// pod at a time, never encoded whole in memory.
 func (h *handler) snapshot(w http.ResponseWriter, r *http.Request) {
-	h.writeJSON(w, r, h.Store.Snapshot())
+	h.write(w, r, h.Store.WriteSnapshot)
 }
 
 // ready is true once at least one round has been recorded, so a replica

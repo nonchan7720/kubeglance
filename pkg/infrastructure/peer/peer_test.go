@@ -3,6 +3,7 @@ package peer
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -22,18 +23,18 @@ func TestClientFetch(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(store.Snapshot())
+		_ = store.WriteSnapshot(w)
 	}))
 	defer srv.Close()
 	host, portStr, _ := net.SplitHostPort(srv.Listener.Addr().String())
 	port, _ := strconv.Atoi(portStr)
 
-	snap, err := NewClient(host, port, "").Fetch(context.Background())
-	if err != nil {
+	dst := domain.NewStore(15*time.Second, time.Minute)
+	if err := NewClient(host, port, "").Fetch(context.Background(), readInto(dst)); err != nil {
 		t.Fatal(err)
 	}
-	if len(snap.Pods) != 1 || snap.Pods[0].Samples[0].Usage.CPU != 5 {
-		t.Errorf("snapshot = %+v", snap)
+	if got := dst.PodSamples(key, time.Time{}); len(got) != 1 || got[0].Usage.CPU != 5 {
+		t.Errorf("copied samples = %+v", got)
 	}
 }
 
@@ -42,8 +43,25 @@ func TestClientFetchNon200(t *testing.T) {
 	defer srv.Close()
 	host, portStr, _ := net.SplitHostPort(srv.Listener.Addr().String())
 	port, _ := strconv.Atoi(portStr)
-	if _, err := NewClient(host, port, "").Fetch(context.Background()); err == nil {
+	if err := NewClient(host, port, "").Fetch(context.Background(), readInto(domain.NewStore(15*time.Second, time.Minute))); err == nil {
 		t.Error("expected error on 503")
+	}
+}
+
+func TestClientFetchReportsABrokenBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"pods":[{`)) }))
+	defer srv.Close()
+	host, portStr, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	port, _ := strconv.Atoi(portStr)
+	if err := NewClient(host, port, "").Fetch(context.Background(), readInto(domain.NewStore(15*time.Second, time.Minute))); err == nil {
+		t.Error("expected an error on a truncated snapshot")
+	}
+}
+
+func readInto(s *domain.Store) func(io.Reader) error {
+	return func(r io.Reader) error {
+		_, err := s.ReadSnapshot(r)
+		return err
 	}
 }
 
@@ -97,14 +115,14 @@ func TestClientSendsTheAuthToken(t *testing.T) {
 	if err != nil || len(peers) != 1 {
 		t.Fatalf("peers = %v, %v", peers, err)
 	}
-	if _, err := peers[0].Fetch(context.Background()); err != nil {
+	if err := peers[0].Fetch(context.Background(), readInto(domain.NewStore(15*time.Second, time.Minute))); err != nil {
 		t.Fatal(err)
 	}
 	if got != "Bearer s3cret" {
 		t.Errorf("Authorization = %q, want the replicas' shared token", got)
 	}
 	got = ""
-	if _, err := NewClient(host, port, "").Fetch(context.Background()); err != nil || got != "" {
+	if err := NewClient(host, port, "").Fetch(context.Background(), readInto(domain.NewStore(15*time.Second, time.Minute))); err != nil || got != "" {
 		t.Errorf("without a token: Authorization = %q (%v)", got, err)
 	}
 }

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"time"
 
@@ -39,14 +40,17 @@ func Bootstrap(ctx context.Context, store *domain.Store, find PeerFinder, disk S
 	}
 	merged := copyFromPeers(ctx, store, find, pol, log)
 	if disk != nil {
-		snap, ok, err := disk.Load()
+		var info domain.SnapshotInfo
+		ok, err := disk.Load(func(r io.Reader) (err error) {
+			info, err = store.ReadSnapshot(r)
+			return err
+		})
 		switch {
 		case err != nil:
-			log.Warn("snapshot on disk could not be read", "err", err)
+			log.Warn("snapshot on disk could not be read", "err", err, "podsMerged", info.Pods)
 		case ok:
-			store.Merge(snap)
 			merged++
-			log.Info("history loaded from disk", "pods", len(snap.Pods), "nodes", len(snap.Nodes), "takenAt", snap.TakenAt)
+			log.Info("history loaded from disk", "pods", info.Pods, "nodes", info.Nodes, "takenAt", info.TakenAt)
 		}
 	}
 	return merged
@@ -83,15 +87,20 @@ func fetchAll(ctx context.Context, store *domain.Store, peers []PeerSource, log 
 	merged := 0
 	for _, p := range peers {
 		pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		snap, err := p.Fetch(pctx)
+		var info domain.SnapshotInfo
+		err := p.Fetch(pctx, func(r io.Reader) (err error) {
+			info, err = store.ReadSnapshot(r)
+			return err
+		})
 		cancel()
 		if err != nil {
-			log.Info("peer not available for bootstrap", "peer", p.String(), "err", err)
+			// what arrived before the error is merged; merging again is
+			// idempotent, so the next try or peer completes it
+			log.Info("peer not available for bootstrap", "peer", p.String(), "err", err, "podsMerged", info.Pods)
 			continue
 		}
-		store.Merge(snap)
 		merged++
-		log.Info("history copied from peer", "peer", p.String(), "pods", len(snap.Pods), "nodes", len(snap.Nodes), "takenAt", snap.TakenAt)
+		log.Info("history copied from peer", "peer", p.String(), "pods", info.Pods, "nodes", info.Nodes, "takenAt", info.TakenAt)
 	}
 	return merged
 }
@@ -136,7 +145,7 @@ func (p *Persister) Run(ctx context.Context) {
 }
 
 func (p *Persister) save() {
-	if err := p.disk.Save(p.store.Snapshot()); err != nil {
+	if err := p.disk.Save(p.store.WriteSnapshot); err != nil {
 		p.log.Warn("snapshot not saved", "err", err)
 	}
 }
