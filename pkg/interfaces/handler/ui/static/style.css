@@ -46,11 +46,16 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 header { position: sticky; top: 0; z-index: 2; background: var(--bg);
   padding: calc(env(safe-area-inset-top) + 10px) var(--pad) 8px; border-bottom: 1px solid var(--line);
   display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-header h1 { font-size: 17px; line-height: 1; margin: 0; font-weight: 650; letter-spacing: 0.2px; }
+header h1 { font-size: 17px; line-height: 1; margin: 0; font-weight: 650; letter-spacing: 0.2px;
+  /* the box from cap height to baseline, so flex centring lines the logo and the dot up with the letters,
+     not with the descender space under them */
+  text-box: trim-both cap alphabetic; }
 .title { display: flex; align-items: center; gap: 8px; }
 .logo { display: block; width: 24px; height: 24px; flex: none; }
-.status { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; flex: none;
-  padding: 0; border: 0; background: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+/* the dot sits right after the title (6 px); its tap area reaches past it */
+.status { position: relative; display: flex; align-items: center; justify-content: center; flex: none;
+  margin-left: -2px; padding: 0; border: 0; background: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.status::after { content: ""; position: absolute; inset: -12px; }
 .dot { display: block; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
 .ok .dot { background: var(--ok); } .bad .dot { background: var(--hot); }
 .statuspanel { margin: 8px var(--pad) 0; padding: 10px 12px; background: var(--card); border: 1px solid var(--line);
