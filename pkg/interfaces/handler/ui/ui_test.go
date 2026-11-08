@@ -1,7 +1,10 @@
 package ui
 
 import (
+	"bytes"
+	"encoding/xml"
 	"fmt"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -352,4 +355,33 @@ func duplicates(keys []string) []string {
 		seen[k] = true
 	}
 	return out
+}
+
+// TestLogoIsTheAppIcon keeps one brand mark: docs/logo.svg (the chart icon,
+// the CNCF Landscape logo) is the icon the UI ships, byte for byte, and is a
+// plain vector (no embedded raster, no text that depends on a font).
+func TestLogoIsTheAppIcon(t *testing.T) {
+	icon, err := static.ReadFile("static/icon.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logo, err := os.ReadFile("../../../../docs/logo.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(icon, logo) {
+		t.Error("docs/logo.svg differs from the UI icon (pkg/interfaces/handler/ui/static/icon.svg)")
+	}
+	var doc struct {
+		XMLName xml.Name
+		ViewBox string `xml:"viewBox,attr"`
+	}
+	if err := xml.Unmarshal(logo, &doc); err != nil || doc.XMLName.Local != "svg" || doc.ViewBox == "" {
+		t.Errorf("not an SVG with a viewBox: %v %+v", err, doc)
+	}
+	for _, banned := range []string{"<image", "<text", "base64,"} {
+		if bytes.Contains(logo, []byte(banned)) {
+			t.Errorf("logo contains %q", banned)
+		}
+	}
 }

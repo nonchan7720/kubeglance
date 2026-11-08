@@ -18,7 +18,7 @@ A Claude Code cloud container cannot do this part: `dockerd` starts and the k3s 
 - [ ] Watch the first `Release please` run on `main` (prerelease path) and the first release PR; fix what breaks (the workflows were ported from manifold and have not run here yet).
 - [ ] Make sure `GITHUB_TOKEN` can push to `ghcr.io/nonchan7720/kubeglance` and `ghcr.io/nonchan7720/charts` (package visibility, "Inherit access from source repository").
 - [ ] Tag `v0.1.0` via release-please; verify the multi-arch image (`amd64`, `arm64`, `armv7` for Raspberry Pi) and `helm install oci://...` from a clean machine.
-- [ ] Add `icon` to `Chart.yaml` (helm lint INFO) and a logo SVG under `docs/` (the CNCF Landscape needs an SVG logo anyway).
+- [x] Add `icon` to `Chart.yaml` (helm lint INFO) and a logo SVG under `docs/` (the CNCF Landscape needs an SVG logo anyway). `docs/logo.svg` is the UI icon; a test keeps them identical. The Landscape prefers a logo that includes the name: a wordmark (with the text converted to paths) is still to do. The mark is a kingfisher (the "flash of blue": it watches from its perch and strikes in an instant), in Kubernetes blue.
 - [ ] `THIRD_PARTY_NOTICES.md` generation (go-licenses) and a CI check that it is current, like depgraph.
 
 ## 2. Product gaps the owner will hit first
