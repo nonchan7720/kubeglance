@@ -1,4 +1,5 @@
-"""Writes docs/wordmark.svg and docs/wordmark-on-dark.svg: the logo's own
+"""Writes docs/wordmark.svg, docs/wordmark-on-dark.svg and the UI's
+pkg/interfaces/handler/ui/static/wordmark.svg: the logo's own
 paths (unchanged, placed with a transform; a test checks this) and
 "kubeglance" in Inter Display SemiBold converted to outlines, so the files
 need no font.
@@ -72,3 +73,19 @@ def svg(fg):
 '''
 open(out_light, 'w').write(svg('#16181d'))
 open(out_dark, 'w').write(svg('#eceef1'))
+
+# The UI's header: one file for both themes (the name follows the page's
+# colour scheme, the same colours as --fg in style.css), and a viewBox
+# centred on the letters (cap height to baseline: y = -100 to 0), so flex
+# centring lines the title up with what sits next to it.
+half = max(-50 - y0, y1 + 50)
+ui_vb = f'{x0:.2f} {-50 - half:.2f} {x1 - x0:.2f} {2 * half:.2f}'
+marks = '\n'.join(f'    <path fill="{c}" d="{d}"/>' for c, d in paths)
+open('pkg/interfaces/handler/ui/static/wordmark.svg', 'w').write(f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="{ui_vb}">
+  <style>.name {{ fill: #16181d; }} @media (prefers-color-scheme: dark) {{ .name {{ fill: #eceef1; }} }}</style>
+  <g transform="translate({ox:.4f} {oy:.4f}) scale({k:.6f})">
+{marks}
+  </g>
+  <path class="name" d="{pen.getCommands()}"/>
+</svg>
+''')

@@ -46,12 +46,11 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 header { position: sticky; top: 0; z-index: 2; background: var(--bg);
   padding: calc(env(safe-area-inset-top) + 10px) var(--pad) 8px; border-bottom: 1px solid var(--line);
   display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-header h1 { font-size: 17px; line-height: 1; margin: 0; font-weight: 650; letter-spacing: 0.2px;
-  /* the box from cap height to baseline, so flex centring lines the logo and the dot up with the letters,
-     not with the descender space under them */
-  text-box: trim-both cap alphabetic; }
+header h1 { margin: 0; line-height: 0; }
+/* wordmark.svg (scripts/wordmark.py): the logo and the name, its viewBox centred on the letters,
+   so flex centring lines the dot and the controls up with them */
+.wordmark { display: block; width: auto; height: 24px; }
 .title { display: flex; align-items: center; gap: 8px; }
-.logo { display: block; width: 24px; height: 24px; flex: none; }
 /* the dot sits right after the title (6 px); its tap area reaches past it */
 .status { position: relative; display: flex; align-items: center; justify-content: center; flex: none;
   margin-left: -2px; padding: 0; border: 0; background: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }

@@ -424,9 +424,9 @@ func plainVector(t *testing.T, name string, b []byte) {
 	}
 }
 
-// TestHeaderShowsTheLogo: the title in the header carries the logo (the
-// app icon, the same file), not text alone.
-func TestHeaderShowsTheLogo(t *testing.T) {
+// TestHeaderShowsTheWordmark: the title in the header is the wordmark (the
+// logo with the name), not text alone.
+func TestHeaderShowsTheWordmark(t *testing.T) {
 	html, err := static.ReadFile("static/index.html")
 	if err != nil {
 		t.Fatal(err)
@@ -435,7 +435,32 @@ func TestHeaderShowsTheLogo(t *testing.T) {
 	if len(title) == 0 {
 		t.Fatal("no header title in index.html")
 	}
-	if !strings.Contains(title[0], `<img class="logo" src="icon.svg"`) {
-		t.Errorf("header title has no logo:\n%s", title[0])
+	if !strings.Contains(title[0], `<h1><img class="wordmark" src="wordmark.svg" alt="kubeglance"`) {
+		t.Errorf("header title is not the wordmark:\n%s", title[0])
+	}
+}
+
+// TestUIWordmarkIsTheWordmark: the header's wordmark draws the same logo and
+// name as docs/wordmark.svg (only the name's colour follows the theme), so
+// the UI cannot drift from the brand. scripts/wordmark.py writes both.
+func TestUIWordmarkIsTheWordmark(t *testing.T) {
+	ui, err := static.ReadFile("static/wordmark.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	docs, err := os.ReadFile("../../../../docs/wordmark.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainVector(t, "static/wordmark.svg", ui)
+	d := regexp.MustCompile(` d="[^"]+"`)
+	want, got := d.FindAll(docs, -1), d.FindAll(ui, -1)
+	if len(want) == 0 || len(got) != len(want) {
+		t.Fatalf("static/wordmark.svg has %d paths, docs/wordmark.svg %d", len(got), len(want))
+	}
+	for i := range want {
+		if !bytes.Equal(got[i], want[i]) {
+			t.Errorf("path %d differs from docs/wordmark.svg: regenerate with scripts/wordmark.py", i)
+		}
 	}
 }
