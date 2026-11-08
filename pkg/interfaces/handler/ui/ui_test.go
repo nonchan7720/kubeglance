@@ -372,16 +372,54 @@ func TestLogoIsTheAppIcon(t *testing.T) {
 	if !bytes.Equal(icon, logo) {
 		t.Error("docs/logo.svg differs from the UI icon (pkg/interfaces/handler/ui/static/icon.svg)")
 	}
+	plainVector(t, "docs/logo.svg", logo)
+}
+
+// TestWordmarkCarriesTheLogo: the wordmarks (the mark with the name, for the
+// CNCF Landscape) draw the logo's own paths, unchanged, and the name as
+// outlines, so they cannot drift from the icon or depend on a font.
+func TestWordmarkCarriesTheLogo(t *testing.T) {
+	logo, err := os.ReadFile("../../../../docs/logo.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	marks := svgPath.FindAll(logo, -1)
+	if len(marks) == 0 {
+		t.Fatal("no paths in docs/logo.svg")
+	}
+	for _, name := range []string{"docs/wordmark.svg", "docs/wordmark-on-dark.svg"} {
+		wm, err := os.ReadFile("../../../../" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plainVector(t, name, wm)
+		for _, m := range marks {
+			if !bytes.Contains(wm, m) {
+				t.Errorf("%s does not draw the logo path %.60s...: regenerate it with scripts/wordmark.py", name, m)
+			}
+		}
+		if n := len(svgPath.FindAll(wm, -1)); n != len(marks)+1 {
+			t.Errorf("%s has %d paths, want the logo's %d and one for the name", name, n, len(marks))
+		}
+	}
+}
+
+var svgPath = regexp.MustCompile(`<path fill="#[0-9a-f]{6}" d="[^"]+"/>`)
+
+// plainVector checks an SVG has a viewBox and no embedded raster or text
+// that depends on a font.
+func plainVector(t *testing.T, name string, b []byte) {
+	t.Helper()
 	var doc struct {
 		XMLName xml.Name
 		ViewBox string `xml:"viewBox,attr"`
 	}
-	if err := xml.Unmarshal(logo, &doc); err != nil || doc.XMLName.Local != "svg" || doc.ViewBox == "" {
-		t.Errorf("not an SVG with a viewBox: %v %+v", err, doc)
+	if err := xml.Unmarshal(b, &doc); err != nil || doc.XMLName.Local != "svg" || doc.ViewBox == "" {
+		t.Errorf("%s: not an SVG with a viewBox: %v %+v", name, err, doc)
 	}
 	for _, banned := range []string{"<image", "<text", "base64,"} {
-		if bytes.Contains(logo, []byte(banned)) {
-			t.Errorf("logo contains %q", banned)
+		if bytes.Contains(b, []byte(banned)) {
+			t.Errorf("%s contains %q", name, banned)
 		}
 	}
 }
