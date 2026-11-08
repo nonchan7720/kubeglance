@@ -25,6 +25,14 @@ func TestTimelineAtAndExpected(t *testing.T) {
 		{30, 70, 4},   // [30, 60): 30, 45 = 2; [60, 70]: 60, 70 = 2
 		{0, 50, 4},    // one part ending at to: 0, 15, 30, 45 (50/15 + 1)
 		{100, 100, 1}, // a single instant
+		// windows that do not start on the grid (a window ending "now"
+		// almost never does) count the grid instants inside them, not
+		// length/step + 1
+		{7, 52, 3},    // 15, 30, 45
+		{1, 59, 3},    // 15, 30, 45 (the part ends before the change at 60)
+		{5, 100, 8},   // [5, 60) at 15 s: 15, 30, 45 = 3; [60, 100] at 10 s: 5
+		{61, 99, 3},   // 70, 80, 90
+		{101, 109, 0}, // no instant at all
 	} {
 		if got := tl.Expected(at(c.from), at(c.to)); got != c.want {
 			t.Errorf("Expected(+%d, +%d) = %d, want %d", c.from, c.to, got, c.want)

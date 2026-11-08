@@ -80,3 +80,12 @@ func TestRatio(t *testing.T) {
 		t.Errorf("ratio with zero denominator = %v, want 0", got)
 	}
 }
+
+func TestComputeStatsCountsGridInstantsOfAnUnalignedWindow(t *testing.T) {
+	// [7 s, 52 s] at 15 s holds the slots 15, 30 and 45: three samples are
+	// a complete window, not 3 of 4
+	st := ComputeStats(samples(1, 2, 3, 4)[1:], Window{From: at(7), To: at(52), Step: 15 * time.Second})
+	if st.Expected != 3 || st.Coverage != 1 {
+		t.Errorf("expected/coverage = %d/%v, want 3/1", st.Expected, st.Coverage)
+	}
+}
