@@ -31,6 +31,7 @@ Everything below builds, passes `go vet`, `golangci-lint run` (2.15.0, 0 issues)
 | Peer discovery (headless Service) + snapshot fetch | `pkg/infrastructure/peer/peer.go` | done, tested with httptest |
 | Snapshot file (gzip JSON, atomic rename) | `pkg/infrastructure/snapshot/file.go` | done, tested |
 | HTTP API + embedded UI (4 screens, drill-down node→pods, workload→pods, pod→containers, window selector, sparklines with gaps, namespace filter, sort toggle, PWA manifest, en/ja i18n, gzip) | `pkg/interfaces/handler/**` | done; UI checked by screenshot at 375 px (dark and light, en and ja); DICT key parity is a Go test |
+| Alerts: rules + delivery state (`domain/alert.go`), Alerter (`services/alert.go`, runs after every collector round), sender election (`peer/sender.go`), webhook `json` / `pushshell` (`infrastructure/webhook`), UI deep links `?pod=` / `?node=` and pushshell registration, chart `alerts.*` | `pkg/**/alert*.go`, `pkg/infrastructure/webhook`, `app.js` | done, tested; not yet run against a real receiver (TODO §0) |
 | `main.go` wiring, graceful shutdown; cobra command, flags/env | `main.go`, `pkg/interfaces/cmd.go` | done |
 | Synthetic-data dev server (`mise run dev`) | `internal/devserver/main.go` | done |
 | Helm chart (Deployment w/ RollingUpdate + preStop sleep, Service + headless `-peers`, RBAC read-only, optional PVC, Ingress) | `charts/kubeglance` | done, lints and renders |
@@ -45,7 +46,10 @@ Everything below builds, passes `go vet`, `golangci-lint run` (2.15.0, 0 issues)
 mise install && mise run ci     # must be green before any PR
 mise run dev                    # UI with synthetic data at :8080, no cluster
 mise run run                    # real cluster via your kubeconfig
+mise run e2e                    # kind + metrics-server + the chart, then go test -tags e2e ./e2e/
 ```
+
+The e2e runs in CI (job `e2e`). It cannot run in a Claude Code cloud container: the host is cgroup v1, which the kind kubelet refuses, and with that allowed every pod sandbox still fails (`runc ... oom_score_adj: Permission denied`). Change the e2e by pushing and reading the job's log; on failure `scripts/e2e.sh` prints the pods, kubeglance's and the receiver's logs and the events.
 
 - Work on a branch, open a **draft PR** with a Conventional Commits title; never push to `main`.
 - **A release version is pinned in a commit message, never in `release-please/config.json`** (a `release-as` there pins every later release to it too). The squash commit of a single-commit PR here keeps only the title (its body is dropped; multi-commit PRs list each commit's message, but a footer in the middle of that list is not reliably read as one). So put the footer in the PR body as a commit override, which release-please reads in place of the merged commit's message, also after the merge (#29 needed it):
@@ -59,6 +63,8 @@ mise run run                    # real cluster via your kubeconfig
   ```
 
 - **Related PRs are a GitHub stacked PR**, not just PRs whose bases point at each other: each PR's base is the branch of the one below it, and the chain is registered as a stack (Stacked PRs are enabled on this repository). From a Claude Code cloud session `gh pr` (GraphQL) is blocked, so use the REST API: `gh api -X POST repos/nonchan7720/kubeglance/stacks -f 'pull_requests[]=…'` with the PR numbers bottom to top (or `--input` a JSON body `{"pull_requests":[…]}`), `POST …/stacks/{n}/add` for a new top, `GET …/stacks?pull_request={n}` to check. Bring a lower PR's changes up the stack by merging its branch into the one above (no force-push), and push each.
+- **When the session cannot call the stacks API.** Some Claude Code cloud sessions allow `gh` for search only, and the GitHub tools have no stacks endpoint, so `POST …/stacks` cannot be sent from there (#33 / #34, 2026-11). Then: (1) still build the stack by base branch: the bottom PR on `main`, each one above with its base set to the branch below (`update_pull_request` changes a base); (2) bring a lower PR's changes up by merging its branch into the one above, never by force-push; (3) say in each PR body which PR it stacks on and the merge order, bottom first (GitHub moves the upper PR's base to `main` when the lower one is merged); (4) tell the owner in one line that the stack is not registered and why. Do not ask the owner to run the command; register it from the next session that can.
+- **Talking to the owner.** Reply in Japanese (code, commits, PRs and docs stay English). Never ask the owner to run a command or a script: do it, or say in one line that this session cannot and why.
 - claude-hook-gate runs fmt/vet/package tests after every edit and the full `ci` before you stop. If `depgraph watch --root .` is running, it also blocks on new import cycles, layer violations and duplicated code. Do not weaken `.claude/gate.yaml` to get past a failure.
 - Tests first. The domain package is pure; its statistics are checked against hand-computed values (see `pkg/domain/stats_test.go`): keep that style.
 - Edit `README.md` and `README_ja.md` together (a gate rule fails when only one changed).
@@ -87,12 +93,17 @@ mise run run                    # real cluster via your kubeconfig
 - **`Limits` is zeroed when any container has no limit** (`podInfo`): a pod is only as limited as its least limited container. The UI then shows "% of request" instead.
 - **One brand mark.** `docs/logo.svg` (a kingfisher) is byte for byte the UI icon `static/icon.svg`; `docs/wordmark.svg` / `docs/wordmark-on-dark.svg` and the UI header's `static/wordmark.svg` (one file for both themes, its viewBox centred on the letters) draw its paths unchanged plus the name as outlines and the sparkline it perches on. `docs/logo.svg` is the master drawing (no generator): edit it, copy it to the icon, then rerun `scripts/wordmark.py` (its docstring has the pinned versions and the font); `ui_test.go` fails on any drift.
 
+- **Alerts are evaluated by every replica and sent by one.** `peer.Sender` picks the Ready replica with the lowest pod IP from the headless Service; the others mark what fires as delivered (`Alerts.Delivered`), so a hand-over repeats nothing. A replica's first evaluation with peers present assumes they already sent what fires (there is no shared alert state; the README says what that costs). Keep it free of API-server writes: a Lease would need write RBAC and break "read-only".
+- **`domain.Alerts` is level-triggered.** `Pending` is "state differs from what the receiver was told"; delivery failures are retries for free. `Delivered` ignores an alert whose status changed since `Pending`. A rule's verdict counts gaps as below (`Evaluate`): never make a gap fire an alert, and never shrink the window to the samples present.
+- **The webhook URL and headers are secrets.** The URL is logged and put in errors as scheme + host only (`redactURL` in `cmd.go`, `webhook.Redact`); the chart passes it as an env var (or from a Secret), never a flag. Headers come only from `--alert-headers-file`.
+- **pushshell's login ID is `kubeglance`** (`webhook.LoginID` and `PUSHSHELL_LOGIN` in `app.js`): change both or neither. pushshell's `collapseKey` allows 64 characters, hence the hash.
+
 - **metrics-server's `window` is not its resolution.** It is the gap between the two kubelet samples metrics-server holds (`last.Timestamp - prev.Timestamp` in its `pkg/storage`), and a scrape that brings no newer sample keeps the older one: kind's kubelets made it alternate 20 s and 10 s at a 15 s resolution. `resolutionEstimator` averages the spacing of every distinct sample seen over three minutes instead. The API serves `Timestamp` in whole seconds but `Window` to the nanosecond, so one sample seen in two lists is up to a second apart; samples less than 2 s apart are one (`sameSample`).
 - **`Expected` counts grid instants, and windows end at the newest due slot** (`Timeline.Expected`, `services.dueWindow`). `length / step + 1` claims a sample too many for any window that does not start on the grid, and the current slot is not a gap before its mid-slot poll; both made a complete history show "gaps" in the UI. All three were found by the end-to-end test on kind.
 
 ## Branch rulesets
 
-Copied from manifold: **CI check** (required status checks `ci` and `pr-title` on `main` and `release/v*`, no deletion / force push) and **PR Approve** (one approval, squash only; bypass for admins, Renovate and the release app). `auto-approve.yaml` is what satisfies the approval for the owner's own PRs. The `pr-title` job id must not be renamed without updating the ruleset.
+Copied from manifold: **CI check** (required status checks `ci`, `pr-title` and `e2e` on `main` and `release/v*`, no deletion / force push) and **PR Approve** (one approval, squash only; bypass for admins, Renovate and the release app). `auto-approve.yaml` is what satisfies the approval for the owner's own PRs. The `pr-title` job id must not be renamed without updating the ruleset. The `e2e` job (kind) is required too (owner decision, 2026-11; added to the ruleset once the job is on `main`): the same applies to its id.
 
 ## Repository bootstrap
 

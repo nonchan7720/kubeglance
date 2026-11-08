@@ -72,6 +72,24 @@ type Resolver interface {
 // the host is set; a headless Service with no other ready endpoint resolves
 // to nothing, which is not an error.
 func Discover(ctx context.Context, r Resolver, host string, port int, self, token string) ([]*Client, error) {
+	addrs, err := lookup(ctx, r, host)
+	if err != nil {
+		return nil, err
+	}
+	var peers []*Client
+	for _, a := range addrs {
+		ip := a.IP.String()
+		if ip == self {
+			continue
+		}
+		peers = append(peers, NewClient(ip, port, token))
+	}
+	return peers, nil
+}
+
+// lookup resolves the headless Service. An empty host, or one with no Ready
+// endpoint (which does not resolve), is no address and no error.
+func lookup(ctx context.Context, r Resolver, host string) ([]net.IPAddr, error) {
 	if host == "" {
 		return nil, nil
 	}
@@ -83,13 +101,5 @@ func Discover(ctx context.Context, r Resolver, host string, port int, self, toke
 		}
 		return nil, fmt.Errorf("resolve %s: %w", host, err)
 	}
-	var peers []*Client
-	for _, a := range addrs {
-		ip := a.IP.String()
-		if ip == self {
-			continue
-		}
-		peers = append(peers, NewClient(ip, port, token))
-	}
-	return peers, nil
+	return addrs, nil
 }

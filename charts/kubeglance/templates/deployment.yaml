@@ -51,7 +51,35 @@ spec:
             {{- if .Values.auth.existingSecret }}
             - --auth-token-file=/etc/kubeglance/auth/token
             {{- end }}
+            {{- if include "kubeglance.alerts" . }}
+            {{- with .Values.alerts }}
+            - --alert-format={{ .format }}
+            - --alert-window={{ .window }}
+            - --alert-memory={{ .memory }}
+            - --alert-cpu={{ .cpu }}
+            - --alert-language={{ .language }}
+            {{- with .publicURL }}
+            - --public-url={{ . }}
+            {{- end }}
+            {{- end }}
+            {{- if include "kubeglance.alertHeaders" . }}
+            - --alert-headers-file=/etc/kubeglance/alerts/headers
+            {{- end }}
+            {{- end }}
           env:
+            {{- if include "kubeglance.alerts" . }}
+            # an env var, not a flag: the URL may be a credential, and a flag
+            # value shows in the process list
+            - name: KUBEGLANCE_ALERT_WEBHOOK
+              {{- if and .Values.alerts.existingSecret .Values.alerts.urlKey }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.alerts.existingSecret }}
+                  key: {{ .Values.alerts.urlKey }}
+              {{- else }}
+              value: {{ .Values.alerts.webhook | quote }}
+              {{- end }}
+            {{- end }}
             - name: POD_IP
               valueFrom:
                 fieldRef:
@@ -91,7 +119,7 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if or .Values.snapshot.enabled .Values.auth.existingSecret }}
+          {{- if or .Values.snapshot.enabled .Values.auth.existingSecret (include "kubeglance.alertHeaders" .) }}
           volumeMounts:
             {{- if .Values.snapshot.enabled }}
             - name: data
@@ -102,8 +130,13 @@ spec:
               mountPath: /etc/kubeglance/auth
               readOnly: true
             {{- end }}
+            {{- if include "kubeglance.alertHeaders" . }}
+            - name: alerts
+              mountPath: /etc/kubeglance/alerts
+              readOnly: true
+            {{- end }}
           {{- end }}
-      {{- if or .Values.snapshot.enabled .Values.auth.existingSecret }}
+      {{- if or .Values.snapshot.enabled .Values.auth.existingSecret (include "kubeglance.alertHeaders" .) }}
       volumes:
         {{- if .Values.snapshot.enabled }}
         - name: data
@@ -121,6 +154,14 @@ spec:
             items:
               - key: {{ .Values.auth.key }}
                 path: token
+        {{- end }}
+        {{- if include "kubeglance.alertHeaders" . }}
+        - name: alerts
+          secret:
+            secretName: {{ .Values.alerts.existingSecret }}
+            items:
+              - key: {{ .Values.alerts.headersKey }}
+                path: headers
         {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}

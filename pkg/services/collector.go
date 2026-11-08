@@ -30,6 +30,8 @@ type Collector struct {
 	follow    bool
 	candidate time.Duration // a new resolution seen in `seen` rounds in a row
 	seen      int
+
+	roundCh chan struct{} // signalled after every recorded round (Rounds)
 }
 
 // roundsToSwitch is how many rounds in a row must report a new resolution
@@ -51,8 +53,12 @@ func NewCollector(store *domain.Store, source MetricsSource, log *slog.Logger) *
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Collector{store: store, source: source, log: log, now: time.Now}
+	return &Collector{store: store, source: source, log: log, now: time.Now, roundCh: make(chan struct{}, 1)}
 }
+
+// Rounds is signalled after every recorded round. The signal never blocks
+// the poll: rounds nobody has taken yet collapse into one.
+func (c *Collector) Rounds() <-chan struct{} { return c.roundCh }
 
 // Run polls until ctx is done: once immediately, then in the middle of every
 // following slot (Store.Slot), so every replica polls each slot once
@@ -122,6 +128,10 @@ func (c *Collector) PollOnce(ctx context.Context) {
 	c.lastSuccess, c.lastError = round.At, nil
 	c.rounds++
 	c.followLocked(round)
+	select {
+	case c.roundCh <- struct{}{}:
+	default: // one is already waiting
+	}
 	c.log.Debug("poll recorded", "at", round.At, "pods", len(round.Pods), "nodes", len(round.Nodes))
 }
 

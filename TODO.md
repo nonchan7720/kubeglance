@@ -4,12 +4,15 @@ Ordered by what unblocks the most. Tick items in the PR that does them; keep thi
 
 ## 0. Prove it on a real cluster (blocks everything else)
 
-A Claude Code cloud container cannot do this part: `dockerd` starts and the k3s server in Docker comes up, but every pod sandbox fails (`runc create failed: can't get final child's PID from pipe`), so metrics-server never runs. It has to be the owner's k3s (or any machine with a working nested runtime).
+The e2e test (`mise run e2e`, CI job `e2e`) now proves most of this on kind with metrics-server on every PR; what is left needs the owner's k3s (a k3s-specific metrics-server, static pods, operator-owned pods), a phone, or 24 hours. A Claude Code cloud container cannot run either: its host is cgroup v1 and every pod sandbox fails in runc (`oom_score_adj: Permission denied`).
 
-- [ ] Run `mise run run` against a k3s cluster with metrics-server; confirm all four views populate and owner resolution is right (Deployment / StatefulSet / DaemonSet / CronJob / static pods / an operator-owned pod).
-- [ ] `helm install` from `charts/kubeglance` with `replicaCount: 2`; confirm `/readyz` flips only after the peer copy + first poll.
-- [ ] Rolling update test: change the image tag, watch `kubectl get pods -w`, then check `GET /api/v1/cluster?window=1h` has `coverage: 1` on the new pod. This is the headline claim of the README; it must be measured, not assumed.
+- [x] Four views populate and owners resolve (Deployment / StatefulSet / DaemonSet / CronJob / bare pod; per-container series): e2e `TestViews`, on kind.
+- [ ] The same on the owner's k3s, with its static pods (k3s runs none on kind's control plane) and an operator-owned pod; check that the detected interval is k3s metrics-server's resolution.
+- [x] `helm install` with `replicaCount: 2`; Ready only after the peer copy + first poll: `scripts/e2e.sh` installs with `--wait`, and `TestRollingUpdateKeepsTheHistory` checks every new replica logs the peer copy.
+- [x] Rolling update keeps the history: e2e `TestRollingUpdateKeepsTheHistory` (new replicas younger than a 3-minute window cover ≥ 90 % of it; measured, not assumed). The first runs also found three statistics bugs: the detected interval (window ≠ resolution), `Expected` overcounting unaligned windows, the current slot counted as a gap.
 - [ ] Measure real memory with `kubectl top pod` after 24 h and update the README table if it is off.
+- [x] Alerts end to end with `--alert-format=json`: e2e `TestAlerts` (a pod over 90 % of its memory limit gives one firing alert with two replicas, one resolve when deleted, the right link).
+- [ ] Alerts with `--alert-format=pushshell` to a pushshell backend and the app on a phone: the notification arrives, tapping it opens the pod, the resolve replaces it.
 - [ ] Confirm the preStop `sleep` action works on the owner's k3s version (needs ≥ 1.30); otherwise document `preStopSleepSeconds: 0` more loudly.
 
 ## 1. First release
@@ -40,6 +43,7 @@ A Claude Code cloud container cannot do this part: `dockerd` starts and the k3s 
 - [x] NetworkPolicy template (ingress from the replicas + `networkPolicy.ingressFrom`; egress to DNS, the API server and the replicas). Off by default. `charts/tests/render.sh` checks the renders; it has not been applied to a real CNI yet, see §0.
 - [x] Structured startup log line that prints the effective config (`starting` → `config`; a test fails when a `Config` field is not logged).
 
+- [x] **Alerts** (owner decision, 2026-11: in scope, delivered by webhook): container memory / CPU against its limit, node against allocatable, firing when at least half of `--alert-window` is at or above the threshold; `json` or `pushshell` format; one sender among the replicas (lowest pod IP), no write RBAC. Not yet: per-namespace include / exclude, a repeat interval for long-firing alerts, `/metrics` for deliveries, Slack / Discord / ntfy formats (the `json` body has `title` / `body` for a small adapter until then).
 - [x] Poll interval follows metrics-server's `--metric-resolution` (read from the `window` every poll reports), also when it changes while kubeglance runs, so managed clusters with another resolution are polled at theirs. `--interval` fixes it.
 
 ## 4. Toward the CNCF Landscape

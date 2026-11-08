@@ -20,6 +20,7 @@ kubeglance が答える問いはひとつです。*今、クラスタの CPU と
 - **無停止更新・履歴欠損ゼロ。** レプリカ2台なら、起動中のレプリカが稼働中のレプリカから履歴をコピーしてから Ready になります。[更新時に履歴を保つ仕組み](#更新時に履歴を保つ仕組み) を参照。
 - **モバイルファースト。** ホーム画面に置ける PWA。Tailscale や Cloudflare Tunnel、認証付き Ingress の裏に置いて、通勤電車から自宅ラボを確認。
 - **日本語 / 英語 UI。** ブラウザの言語に従い、`?lang=ja` / `?lang=en` または EN/JA ボタンで切り替え（端末ごとに記憶）。
+- **スマホへのアラート（任意）。** コンテナがメモリ / CPU の limit 近く、またはノードが allocatable 近くにある時間が直近 10 分の半分以上になったら webhook に通知し、収まったらもう一度通知します。[アラート](#アラート) を参照。
 - **読み取り専用・極小フットプリント。** pods / nodes / replicasets / jobs の list/watch と metrics API のみ。要求は CPU 20m、メモリ 64Mi。
 
 > ステータス: 初期段階。コア（コレクタ、履歴、4階層 API、UI、Helm chart）は動作します。次の作業は [TODO.md](TODO.md) を参照。
@@ -51,6 +52,36 @@ helm upgrade kubeglance oci://ghcr.io/nonchan7720/charts/kubeglance -n kubeglanc
 
 ブラウザは最初に一度だけユーザー名（何でもよい）とパスワード（トークン）を尋ねます。API クライアントや Prometheus は `Authorization: Bearer <token>` を送れます。`/healthz`・`/readyz`・Web マニフェスト・アイコンは、プローブとホーム画面への追加のために開いたままです。レプリカ同士は履歴コピーのときにトークンを送り合います。トークンはファイル（マウントした Secret）から読み、フラグでは渡せません。起動ログには設定の有無だけが出ます。
 
+### アラート
+
+既定ではオフです。webhook を設定すると、`--alert-window`（既定 10 分）のうち半分以上の時間、次の値が閾値（`--alert-memory`・`--alert-cpu`。既定 90%、0 でそのリソースを無効化）以上だったときに POST し、収まったとき（`resolved`。Pod やノードが消えたときも）にもう一度 POST します。
+
+| ルール | 比べるもの | 意味 |
+|---|---|---|
+| `container-memory` | コンテナのメモリと、その limit | OOM kill が近い |
+| `container-cpu` | コンテナの CPU と、その limit | スロットリングされている |
+| `node-memory` / `node-cpu` | ノードの使用量と allocatable | ノードが埋まっている |
+
+「現在値」ではなく「ウィンドウの半分」で判定するので、続いている問題は多少下がっても発火し、一瞬のスパイクでは発火せず、ウィンドウの大半が落ち着くまで解消になりません。ウィンドウ内の欠損サンプルは「閾値未満」として数えるので、欠損でアラートが遅れることはあっても、欠損が原因で発火することはありません。limit のないコンテナは比較しません。複数コンテナの Pod はコンテナごとに判定します（OOM kill はコンテナ単位のため）。
+
+```bash
+helm upgrade kubeglance oci://ghcr.io/nonchan7720/charts/kubeglance -n kubeglance --reuse-values \
+  --set alerts.webhook=https://receiver.example.com/kubeglance \
+  --set alerts.publicURL=https://kubeglance.example.ts.net   # アラートから該当の Pod / ノードへリンク
+```
+
+`--alert-format=json`（既定）は 1 回の評価で変わったものを 1 リクエスト `{"version": 1, "alerts": [...]}` で送ります。各アラートには `key`（ルールと対象）、`status`（`firing` / `resolved`）、`since`、`at`、`gone`、`verdict`（閾値、limit、ウィンドウの現在値 / 平均 / 中央値 / p95 と coverage）、そのまま使える `title` と `body`（`--alert-language=en|ja`）、`url` が入ります。`--alert-format=pushshell` は各アラートを [pushshell](https://github.com/nonchan7720/pushshell) のバックエンドへ通知として送ります（`POST /v1/notifications`、ログイン ID `kubeglance` 宛て。解消の通知はスマホ上で発火の通知を置き換えます）。一度に 4 件以上なら 1 件のまとめ通知にします。pushshell アプリの中で kubeglance の UI を開くと、UI が自動でそのログイン ID に端末を登録します。API キーなどのヘッダーは値ではなく Secret から渡します。
+
+```bash
+kubectl -n kubeglance create secret generic kubeglance-alerts --from-literal=headers='X-API-Key: ...'
+helm upgrade ... --set alerts.format=pushshell --set alerts.webhook=https://push.example.com/v1/notifications \
+  --set alerts.existingSecret=kubeglance-alerts --set alerts.headersKey=headers
+```
+
+URL 自体が認証情報になっている場合（Slack 形式の webhook）は、同じ Secret に入れて `alerts.webhook` の代わりに `alerts.urlKey` を指定してください。起動ログにはスキームとホストだけが出ます。`networkPolicy.enabled` のときは受信側への egress を追加します（`alerts.egress`）。
+
+全レプリカが同じ履歴に対してルールを評価し、同じ判定になります。送信するのは Pod IP が最小の Ready なレプリカだけなので、2 レプリカでも二重に通知せず、API サーバーへの書き込み権限も要りません。そのレプリカがいなくなると、もう一方が送信済みのものを繰り返さずに引き継ぎます。送信に失敗したら次の評価で再送します。状態をメモリの外に持たないことによる制約が 1 つあります。稼働中のレプリカの横で起動したレプリカは、その時点で発火しているものは送信済みとみなします。そのため、アラートを初めて有効にした時点ですでに発火しているものは、いったん解消して再び発火するまで送られません。
+
 linux / darwin / windows（amd64, arm64, armv7）のバイナリは [Releases](https://github.com/nonchan7720/kubeglance/releases) にあります。クラスタ外からは `kubeglance --kubeconfig ~/.kube/config` で動かせます。
 
 ## 設定
@@ -70,6 +101,14 @@ linux / darwin / windows（amd64, arm64, armv7）のバイナリは [Releases](h
 | `--shutdown-grace` (`KUBEGLANCE_SHUTDOWN_GRACE`) | `5s` | SIGTERM 後もこの時間は応答し、新レプリカのコピー完了を待つ |
 | `--bootstrap-timeout` (`KUBEGLANCE_BOOTSTRAP_TIMEOUT`) | `2m` | ピアはいるのに 1 つも応答しないとき、起動中のレプリカが履歴コピーを再試行する時間。その間は Ready にならない |
 | `--auth-token-file` (`KUBEGLANCE_AUTH_TOKEN_FILE`) | | UI・API・`/metrics`・ピアコピーに要求するトークンを書いたファイル。空なら無効。[アクセス](#アクセス) を参照 |
+| `--alert-webhook` (`KUBEGLANCE_ALERT_WEBHOOK`) | | アラートを受け取る URL。空なら無効。[アラート](#アラート) を参照 |
+| `--alert-format` (`KUBEGLANCE_ALERT_FORMAT`) | `json` | `json`（全アラートを 1 リクエストで）または `pushshell`（アラートごとに pushshell の通知） |
+| `--alert-headers-file` (`KUBEGLANCE_ALERT_HEADERS_FILE`) | | 毎回送る `Name: value` 形式のヘッダー（API キーなど）を書いたファイル |
+| `--alert-window` (`KUBEGLANCE_ALERT_WINDOW`) | `10m` | このウィンドウの半分以上が閾値以上ならルールが発火する |
+| `--alert-memory` (`KUBEGLANCE_ALERT_MEMORY`) | `0.9` | メモリの閾値。コンテナの limit・ノードの allocatable に対する割合。`0` で無効 |
+| `--alert-cpu` (`KUBEGLANCE_ALERT_CPU`) | `0.9` | CPU について同上 |
+| `--alert-language` (`KUBEGLANCE_ALERT_LANGUAGE`) | `en` | アラート本文の言語: `en` / `ja` |
+| `--public-url` (`KUBEGLANCE_PUBLIC_URL`) | | スマホから kubeglance に届く URL。アラートはそこの `?pod=namespace/name` / `?node=name` にリンクする |
 | `--kubeconfig` | | クラスタ外用。未指定なら in-cluster → `$KUBECONFIG` → `~/.kube/config` |
 | `--log-level` (`KUBEGLANCE_LOG_LEVEL`) | `info` | `debug` / `info` / `warn` / `error`（stderr に JSON） |
 
@@ -126,9 +165,9 @@ metrics-server は瞬間値しか返さないので、ポーリングの空白�
 
 ```
 main.go              全体の配線
-pkg/domain           サンプル、リングバッファ Series、Stats（avg / median / p95 / coverage）、Store、集約。Kubernetes 非依存
-pkg/services         Collector（ポーリング → store）、Query（4つのビュー）、Bootstrap（ピア、ディスク）、Persister
-pkg/infrastructure   k8s（metrics.k8s.io ポーリング、Pod → owner のインフォーマー、ノード）、peer（HTTP）、snapshot（ファイル）
+pkg/domain           サンプル、リングバッファ Series、Stats（avg / median / p95 / coverage）、Store、集約、アラートのルール。Kubernetes 非依存
+pkg/services         Collector（ポーリング → store）、Query（4つのビュー）、Bootstrap（ピア、ディスク）、Persister、Alerter
+pkg/infrastructure   k8s（metrics.k8s.io ポーリング、Pod → owner のインフォーマー、ノード）、peer（HTTP、アラート送信役の選出）、snapshot（ファイル）、webhook（アラート）
 pkg/interfaces       コマンドライン（cobra: フラグ、環境変数）と HTTP API・埋め込み UI（素の HTML / CSS / JS。ビルドなし、CDN なし）
 charts/kubeglance    Helm chart
 internal/devserver   `mise run dev`: クラスタなしで合成データの UI を表示
@@ -139,13 +178,16 @@ internal/devserver   `mise run dev`: クラスタなしで合成データの UI 
 ## 開発
 
 ```bash
-mise install         # Go, golangci-lint, helm, goreleaser（mise.toml で固定）
+mise install         # Go, golangci-lint, helm, goreleaser, kind, kubectl（mise.toml で固定）
 mise run ci          # lint (incl. govet) + test + helm lint + build + notices check
 mise run notices     # 依存を追加したら THIRD_PARTY_NOTICES.md を再生成
 mise run dev         # 合成データの UI を http://127.0.0.1:8080 で
 mise run run         # 現在の kubeconfig コンテキストに対して実行
+mise run e2e         # kind で E2E テスト（Docker が必要）。下記を参照
 mise run depgraph:watch   # 依存グラフと Findings（Neo4j 用に Docker が必要）
 ```
+
+`mise run e2e`（`scripts/e2e.sh`。CI の `e2e` ジョブも同じ）は 2 ノードの kind クラスタを作り、metrics-server と、レプリカ 2 台・テスト用受信先へのアラートを有効にした chart を入れて `go test -tags e2e ./e2e/` を実行します。確かめるのは、すべての owner の種類がビューで解決されること、ポーリング間隔が metrics-server に従うこと、メモリ limit の 90% を超えた Pod のアラートが（レプリカごとではなく）1 回だけ届き、削除すると解消が 1 回だけ届くこと、ローリング更新の後も新しいレプリカが直近 3 分を欠けなく持っていること（履歴コピー）です。テスト用のコンテナはすべて `e2e/helper` からビルドする 1 つのイメージで動くので、kind のノードイメージと metrics-server 以外は何も pull しません。`E2E_KEEP=1` でクラスタを残せます。
 
 リリース: `main` の Conventional Commits から release-please がリリース PR を作り、マージすると `vX.Y.Z` タグが打たれ、goreleaser がバイナリ・マルチアーキイメージ（`ghcr.io/nonchan7720/kubeglance`）・Helm chart（`oci://ghcr.io/nonchan7720/charts/kubeglance`）を公開します。それ以外の `main` への push は `vX.Y.Z-dev.<sha>` のプレリリースになります。
 

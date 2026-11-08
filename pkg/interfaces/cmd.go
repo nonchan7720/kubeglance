@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -37,6 +38,25 @@ type Config struct {
 	// Secret); AuthToken is what it contains, read at start. Never logged.
 	AuthTokenFile string
 	AuthToken     string
+
+	// AlertWebhook receives alerts; empty disables them. It may itself be a
+	// credential (a Slack-style URL): only its scheme and host are logged.
+	AlertWebhook string
+	AlertFormat  string // json | pushshell
+	// AlertHeadersFile holds "Name: value" lines sent with every alert (an
+	// API key; a mounted Secret); AlertHeaders is its content. Never logged.
+	AlertHeadersFile string
+	AlertHeaders     string
+	// AlertWindow is how far back a rule looks; it fires when at least half
+	// of it is at or above the threshold.
+	AlertWindow time.Duration
+	// AlertMemory and AlertCPU are thresholds as a fraction of a container's
+	// limit and a node's allocatable; 0 disables the resource's rules.
+	AlertMemory   float64
+	AlertCPU      float64
+	AlertLanguage string // of the notification text: en | ja
+	// PublicURL is where a phone reaches kubeglance; alerts link to it.
+	PublicURL string
 }
 
 // LogValue makes the effective configuration (flags, environment and
@@ -60,6 +80,15 @@ func (c Config) LogValue() slog.Value {
 		slog.String("bootstrapTimeout", c.BootstrapTimeout.String()),
 		slog.String("authTokenFile", c.AuthTokenFile),
 		slog.String("authToken", secretState(c.AuthToken)), // never the value
+		slog.String("alertWebhook", redactURL(c.AlertWebhook)),
+		slog.String("alertFormat", c.AlertFormat),
+		slog.String("alertHeadersFile", c.AlertHeadersFile),
+		slog.String("alertHeaders", secretState(c.AlertHeaders)), // never the value
+		slog.String("alertWindow", c.AlertWindow.String()),
+		slog.Float64("alertMemory", c.AlertMemory),
+		slog.Float64("alertCPU", c.AlertCPU),
+		slog.String("alertLanguage", c.AlertLanguage),
+		slog.String("publicURL", c.PublicURL),
 	)
 }
 
@@ -69,6 +98,19 @@ func secretState(s string) string {
 		return "none"
 	}
 	return "set"
+}
+
+// redactURL keeps the scheme and host of a URL whose path or query may be a
+// credential.
+func redactURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "(invalid)"
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // intervalString is "auto" for 0 (follow metrics-server), else the duration.
@@ -110,7 +152,10 @@ a flag on the command line wins over the variable.`,
 			if err := applyEnv(cmd.Flags()); err != nil {
 				return err
 			}
-			return readToken(&c)
+			if err := readToken(&c); err != nil {
+				return err
+			}
+			return checkAlerts(&c)
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			log, err := newLogger(c.LogLevel)
@@ -137,20 +182,36 @@ a flag on the command line wins over the variable.`,
 	f.StringVar(&c.LogLevel, "log-level", "info", "debug | info | warn | error")
 	f.StringVar(&c.AuthTokenFile, "auth-token-file", "", "file with a token required on the UI, the API and /metrics (Basic auth password or Bearer token); empty disables. A file, not a flag value, so it is not in the process list")
 	f.DurationVar(&c.BootstrapTimeout, "bootstrap-timeout", 2*time.Minute, "how long a starting replica retries copying the history from a peer before it starts without it (it is not Ready meanwhile)")
+	f.StringVar(&c.AlertWebhook, "alert-webhook", "", "URL that receives alerts (HTTP POST); empty disables alerts")
+	f.StringVar(&c.AlertFormat, "alert-format", "json", "json (kubeglance's own, every alert in one request) | pushshell (a pushshell /v1/notifications request per alert)")
+	f.StringVar(&c.AlertHeadersFile, "alert-headers-file", "", "file with \"Name: value\" lines sent with every alert, such as an API key")
+	f.DurationVar(&c.AlertWindow, "alert-window", 10*time.Minute, "a rule fires when at least half of this window is at or above its threshold")
+	f.Float64Var(&c.AlertMemory, "alert-memory", 0.9, "memory threshold as a fraction of a container's limit and a node's allocatable; 0 disables")
+	f.Float64Var(&c.AlertCPU, "alert-cpu", 0.9, "CPU threshold as a fraction of a container's limit and a node's allocatable; 0 disables")
+	f.StringVar(&c.AlertLanguage, "alert-language", "en", "language of the alert text: en | ja")
+	f.StringVar(&c.PublicURL, "public-url", "", "where a phone reaches kubeglance (https://...); alerts link to their pod or node")
 
 	for flag, key := range map[string]string{ //nolint:gosec // G101: environment variable names, not credentials
-		"addr":              "KUBEGLANCE_ADDR",
-		"interval":          "KUBEGLANCE_INTERVAL",
-		"retention":         "KUBEGLANCE_RETENTION",
-		"peer-host":         "KUBEGLANCE_PEER_HOST",
-		"peer-port":         "KUBEGLANCE_PEER_PORT",
-		"pod-ip":            "POD_IP",
-		"snapshot":          "KUBEGLANCE_SNAPSHOT",
-		"snapshot-every":    "KUBEGLANCE_SNAPSHOT_EVERY",
-		"shutdown-grace":    "KUBEGLANCE_SHUTDOWN_GRACE",
-		"log-level":         "KUBEGLANCE_LOG_LEVEL",
-		"bootstrap-timeout": "KUBEGLANCE_BOOTSTRAP_TIMEOUT",
-		"auth-token-file":   "KUBEGLANCE_AUTH_TOKEN_FILE",
+		"addr":               "KUBEGLANCE_ADDR",
+		"interval":           "KUBEGLANCE_INTERVAL",
+		"retention":          "KUBEGLANCE_RETENTION",
+		"peer-host":          "KUBEGLANCE_PEER_HOST",
+		"peer-port":          "KUBEGLANCE_PEER_PORT",
+		"pod-ip":             "POD_IP",
+		"snapshot":           "KUBEGLANCE_SNAPSHOT",
+		"snapshot-every":     "KUBEGLANCE_SNAPSHOT_EVERY",
+		"shutdown-grace":     "KUBEGLANCE_SHUTDOWN_GRACE",
+		"log-level":          "KUBEGLANCE_LOG_LEVEL",
+		"bootstrap-timeout":  "KUBEGLANCE_BOOTSTRAP_TIMEOUT",
+		"auth-token-file":    "KUBEGLANCE_AUTH_TOKEN_FILE",
+		"alert-webhook":      "KUBEGLANCE_ALERT_WEBHOOK",
+		"alert-format":       "KUBEGLANCE_ALERT_FORMAT",
+		"alert-headers-file": "KUBEGLANCE_ALERT_HEADERS_FILE",
+		"alert-window":       "KUBEGLANCE_ALERT_WINDOW",
+		"alert-memory":       "KUBEGLANCE_ALERT_MEMORY",
+		"alert-cpu":          "KUBEGLANCE_ALERT_CPU",
+		"alert-language":     "KUBEGLANCE_ALERT_LANGUAGE",
+		"public-url":         "KUBEGLANCE_PUBLIC_URL",
 	} {
 		bindEnv(f, flag, key)
 	}
@@ -202,6 +263,29 @@ func readToken(c *Config) error {
 	if c.AuthToken == "" {
 		return fmt.Errorf("--auth-token-file: %s is empty", c.AuthTokenFile)
 	}
+	return nil
+}
+
+// checkAlerts validates the alert rules and loads --alert-headers-file. The
+// receiver itself (URL, format, language, headers) is checked when main
+// builds the webhook client, before anything starts.
+func checkAlerts(c *Config) error {
+	if c.AlertWindow <= 0 {
+		return fmt.Errorf("--alert-window: %s is not a window", c.AlertWindow)
+	}
+	for name, v := range map[string]float64{"--alert-memory": c.AlertMemory, "--alert-cpu": c.AlertCPU} {
+		if v < 0 || v > 1 {
+			return fmt.Errorf("%s: %v is not a fraction between 0 and 1", name, v)
+		}
+	}
+	if c.AlertHeadersFile == "" {
+		return nil
+	}
+	b, err := os.ReadFile(c.AlertHeadersFile)
+	if err != nil {
+		return fmt.Errorf("--alert-headers-file: %w", err)
+	}
+	c.AlertHeaders = string(b)
 	return nil
 }
 
