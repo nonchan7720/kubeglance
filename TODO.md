@@ -27,7 +27,7 @@ A Claude Code cloud container cannot do this part: `dockerd` starts and the k3s 
 - [x] **Namespace filter** in the Workloads / Pods tabs. Done client-side: the API already returns every row, so the namespace list stays complete without another request.
 - [x] **Sort toggle** (CPU / memory / name) on Nodes, Workloads, Pods. Nodes sort by ratio of allocatable, workloads and pods by usage now.
 - [x] **Container-level breakdown** on the Pod screen: tap a pod for its containers (`GET /api/v1/pods/{namespace}/{name}`). Per-container series are kept for multi-container pods only.
-- [ ] **Downsampling for long retention**: raw 15 s for the last hour, 1-min means beyond, so `--retention=7d` stays small. Design note: stats over a downsampled range must be labelled as such (`coverage` already exists; add `resolution`).
+- **No downsampling (owner decision, 2026-11).** Statistics over a downsampled range would be averages of averages, which the product rules out. Longer history costs memory linearly instead (README "Memory" has 24 h and 7 d figures); a sample is 16 bytes.
 - [x] **Gap rendering**: empty sparkline buckets are shaded, never bridged.
 - [x] **Light theme polish**: checked at 375 px in light and dark, en and ja (avg marker colour, ja tab labels, stats row wrapping, `[hidden]` vs `display: flex`).
 - [x] **i18n**: a test that `DICT.en` and `DICT.ja` have the same keys (a Go test can read the embedded `app.js` and compare), like claude-hook-gate does for its locales.

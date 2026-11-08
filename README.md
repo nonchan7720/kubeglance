@@ -95,17 +95,21 @@ Every row also carries a `spark` object for drawing: about 60 buckets (`bucket` 
 
 ## Memory
 
-A sample is 16 bytes (CPU millicores + memory bytes; the timestamp is shared by the round). At 15 s, 24 h is 5,761 samples per entity:
+A sample is stored in 16 bytes (the instant in whole seconds, CPU millicores, memory bytes; a test keeps it at 16). At 15 s, 24 h is 5,761 samples per entity, 7 days 40,321 (measured heap):
 
-| pods | history (24 h) |
-|---|---|
-| 50 | ~5 MB |
-| 100 | ~9 MB |
-| 300 | ~28 MB |
+| pods | history (24 h) | history (7 d) |
+|---|---|---|
+| 50 | ~5 MB | ~32 MB |
+| 100 | ~10 MB | ~65 MB |
+| 300 | ~30 MB | ~195 MB |
 
 A pod with more than one container keeps one more series per container for the Pod screen's breakdown (a single-container pod's series already is its container's), so a pod with one sidecar costs three series instead of one.
 
 On top of that come the Go runtime, the HTTP server and the client-go caches (10–20 MB). The chart requests 64 Mi and limits 128 Mi, which fits a Raspberry Pi k3s. Lower `--retention` to shrink it; the window selector is capped to the retention.
+
+There is no downsampling: every statistic, over any window, is computed from the raw samples. Memory therefore grows linearly with `--retention`; when you raise it, raise `resources.limits.memory` with it (for example `retention: 7d` with 100 pods: ~65 MB of history plus the runtime, so `limits.memory: 192Mi`).
+
+Handing the history to a starting replica costs a few MB, not a second copy of it: the snapshot is streamed a pod at a time on both ends. The chart also passes the memory limit to the Go runtime as a soft limit of 90 %, so the garbage collector works harder before garbage reaches the container limit. It is not a cap: the history itself is live memory, so size `limits.memory` from the table above.
 
 ## How updates keep the history
 

@@ -1,8 +1,11 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -235,30 +238,51 @@ type fakePeer struct {
 	err  error
 }
 
-func (f fakePeer) Fetch(context.Context) (domain.Snapshot, error) { return f.snap, f.err }
-func (f fakePeer) String() string                                 { return "peer" }
+func (f fakePeer) Fetch(_ context.Context, read func(io.Reader) error) error {
+	if f.err != nil {
+		return f.err
+	}
+	return read(encoded(f.snap))
+}
+func (f fakePeer) String() string { return "peer" }
+
+// encoded is a snapshot as a replica sends it.
+func encoded(snap domain.Snapshot) io.Reader {
+	b, err := json.Marshal(snap)
+	if err != nil {
+		panic(err)
+	}
+	return bytes.NewReader(b)
+}
 
 type fakeDisk struct {
-	snap  domain.Snapshot
-	ok    bool
+	data  []byte
 	saved int
 }
 
-func (d *fakeDisk) Save(s domain.Snapshot) error {
-	d.snap, d.ok, d.saved = s, true, d.saved+1
+func (d *fakeDisk) Save(write func(io.Writer) error) error {
+	var buf bytes.Buffer
+	if err := write(&buf); err != nil {
+		return err
+	}
+	d.data, d.saved = buf.Bytes(), d.saved+1
 	return nil
 }
-func (d *fakeDisk) Load() (domain.Snapshot, bool, error) { return d.snap, d.ok, nil }
+
+func (d *fakeDisk) Load(read func(io.Reader) error) (bool, error) {
+	if d.data == nil {
+		return false, nil
+	}
+	return true, read(bytes.NewReader(d.data))
+}
 
 func TestBootstrapMergesPeerThenDiskAndSkipsFailures(t *testing.T) {
 	src := domain.NewStore(15*time.Second, time.Minute)
 	src.Record(domain.Round{At: at(0), Pods: map[domain.PodKey]domain.Resource{web1: {CPU: 7}}})
 	disk := &fakeDisk{}
-	_ = disk.Save(func() domain.Snapshot {
-		d := domain.NewStore(15*time.Second, time.Minute)
-		d.Record(domain.Round{At: at(15), Pods: map[domain.PodKey]domain.Resource{web1: {CPU: 8}}})
-		return d.Snapshot()
-	}())
+	d := domain.NewStore(15*time.Second, time.Minute)
+	d.Record(domain.Round{At: at(15), Pods: map[domain.PodKey]domain.Resource{web1: {CPU: 8}}})
+	_ = disk.Save(d.WriteSnapshot)
 
 	dst := domain.NewStore(15*time.Second, time.Minute)
 	n := Bootstrap(context.Background(), dst,
@@ -318,12 +342,12 @@ type flakyPeer struct {
 	calls *int
 }
 
-func (f flakyPeer) Fetch(context.Context) (domain.Snapshot, error) {
+func (f flakyPeer) Fetch(_ context.Context, read func(io.Reader) error) error {
 	*f.calls++
 	if *f.calls <= f.fails {
-		return domain.Snapshot{}, errors.New("connection refused")
+		return errors.New("connection refused")
 	}
-	return f.snap, nil
+	return read(encoded(f.snap))
 }
 func (f flakyPeer) String() string { return "flaky" }
 
@@ -352,7 +376,7 @@ func TestBootstrapRetriesUntilAPeerAnswers(t *testing.T) {
 
 func TestBootstrapGivesUpAfterTheTimeoutButStillLoadsDisk(t *testing.T) {
 	disk := &fakeDisk{}
-	_ = disk.Save(domain.NewStore(15*time.Second, time.Minute).Snapshot())
+	_ = disk.Save(domain.NewStore(15*time.Second, time.Minute).WriteSnapshot)
 	calls := 0
 	start := time.Now()
 	n := Bootstrap(context.Background(), domain.NewStore(15*time.Second, time.Minute),

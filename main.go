@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -40,6 +41,10 @@ func main() {
 
 func run(ctx context.Context, c interfaces.Config, log *slog.Logger) error {
 	log.Info("starting", "version", version.Version, "config", c)
+	if limit, ok := interfaces.GoMemoryLimit(os.Getenv); ok {
+		debug.SetMemoryLimit(limit)
+		log.Info("Go memory limit set from the container's", "bytes", limit)
+	}
 
 	clients, err := k8s.NewClients(c.Kubeconfig)
 	if err != nil {
