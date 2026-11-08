@@ -442,18 +442,7 @@ func (s *Store) Snapshot() Snapshot {
 
 // head is a snapshot without pods and nodes; the caller holds the lock.
 func (s *Store) head() snapshotHead {
-	h := snapshotHead{TakenAt: time.Now(), Interval: s.timeline.Current(), Timeline: append(Timeline(nil), s.timeline...), Retention: s.retention}
-	for _, e := range s.pods {
-		if x, ok := e.series.Last(); ok {
-			h.Newest = later(h.Newest, x.At)
-		}
-	}
-	for _, e := range s.nodes {
-		if x, ok := e.series.Last(); ok {
-			h.Newest = later(h.Newest, x.At)
-		}
-	}
-	return h
+	return snapshotHead{TakenAt: time.Now(), Interval: s.timeline.Current(), Timeline: append(Timeline(nil), s.timeline...), Retention: s.retention, Newest: s.newest()}
 }
 
 // podSnapshot copies one pod, its samples up to until (all of them when
@@ -524,8 +513,38 @@ func (s *Store) mergeTimeline(tl Timeline, interval time.Duration, last time.Tim
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.timeline = s.timeline.merge(in, last)
+	t, cur := s.timeline, s.timeline.Current()
+	// an earlier merge (a copy that broke off, or an older peer) placed
+	// where this store's own interval resumes; while nothing is stored at
+	// or after that boundary it moves on past this peer's newest instant,
+	// so this peer's samples up to last are slotted on the peer's grid
+	if n := len(t); n > 1 && !t[n-1].Since.After(last) && s.newest().Before(t[n-1].Since) {
+		t = t[: n-1 : n-1]
+	}
+	out := t.merge(in, last)
+	if out.Current() != cur {
+		since := later(last, out[len(out)-1].Since).Truncate(cur).Add(cur)
+		out = append(out, Resolution{Since: since, Step: cur})
+	}
+	s.timeline = out
 	s.resize()
+}
+
+// newest is the latest instant any pod or node series holds; the caller
+// holds the lock.
+func (s *Store) newest() time.Time {
+	var t time.Time
+	for _, e := range s.pods {
+		if x, ok := e.series.Last(); ok {
+			t = later(t, x.At)
+		}
+	}
+	for _, e := range s.nodes {
+		if x, ok := e.series.Last(); ok {
+			t = later(t, x.At)
+		}
+	}
+	return t
 }
 
 // mergePod merges one pod of a snapshot under the write lock.

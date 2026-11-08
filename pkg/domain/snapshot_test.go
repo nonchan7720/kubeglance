@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"reflect"
 	"slices"
 	"strings"
@@ -247,5 +248,110 @@ func TestReadSnapshotRejectsAHeaderAfterTheSamples(t *testing.T) {
 	in := `{"pods":[],"timeline":[{"since":"0001-01-01T00:00:00Z","step":30000000000}]}`
 	if _, err := NewStore(15*time.Second, time.Minute).ReadSnapshot(strings.NewReader(in)); err == nil {
 		t.Error("no error for a timeline after the pods")
+	}
+}
+
+func TestALaterCopyMovesTheBoundaryOfTheStoresOwnInterval(t *testing.T) {
+	// the starting replica polls every 30 s, its peer every 15 s. A copy
+	// that broke off after the timeline (or a first, older peer) placed the
+	// switch to 30 s just after +150; the retry carries 15 s samples up to
+	// +210, which must stay 15 s apart, not be folded onto a 30 s grid
+	src := NewStore(15*time.Second, time.Hour)
+	p := PodKey{"app", "web"}
+	for i := 0; i <= 10; i++ {
+		src.Record(Round{At: at(i * 15), Pods: map[PodKey]Resource{p: {CPU: int64(i)}}})
+	}
+	var first bytes.Buffer
+	if err := src.WriteSnapshot(&first); err != nil {
+		t.Fatal(err)
+	}
+	dst := NewStore(30*time.Second, time.Hour)
+	broken := first.String()[:strings.Index(first.String(), `"pods":[`)+len(`"pods":[`)]
+	if _, err := dst.ReadSnapshot(strings.NewReader(broken)); err == nil {
+		t.Fatal("a broken copy read without an error")
+	}
+	for i := 11; i <= 14; i++ {
+		src.Record(Round{At: at(i * 15), Pods: map[PodKey]Resource{p: {CPU: int64(i)}}})
+	}
+	var retry bytes.Buffer
+	if err := src.WriteSnapshot(&retry); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dst.ReadSnapshot(&retry); err != nil {
+		t.Fatal(err)
+	}
+	tl := dst.Timeline()
+	if last := tl[len(tl)-1]; last.Step != 30*time.Second || !last.Since.Equal(at(240)) {
+		t.Errorf("timeline %v: the store's own 30 s should start at +240, after the retry's newest +210", tl)
+	}
+	if got := dst.PodSamples(p, time.Time{}); len(got) != 15 {
+		t.Errorf("%d samples, want all 15 (every 15 s up to +210): %v", len(got), got)
+	}
+
+	// once the store recorded its own sample after the boundary, the
+	// boundary stays: moving it would re-slot what is already there
+	own := NewStore(30*time.Second, time.Hour)
+	own.Merge(Snapshot{Timeline: Timeline{{Step: 15 * time.Second}}, Newest: at(150)})
+	own.Record(Round{At: at(185), Pods: map[PodKey]Resource{p: {CPU: 1}}})
+	own.Merge(Snapshot{Timeline: Timeline{{Step: 15 * time.Second}}, Newest: at(210)})
+	if tl := own.Timeline(); !tl[len(tl)-1].Since.Equal(at(180)) {
+		t.Errorf("timeline %v: the boundary moved under the store's own sample", tl)
+	}
+}
+
+// moveOnFirstWrite moves every pod to another node the first time the
+// snapshot reaches the writer.
+type moveOnFirstWrite struct {
+	store *Store
+	pods  []PodInfo
+	done  bool
+}
+
+func (m *moveOnFirstWrite) Write(p []byte) (int, error) {
+	if !m.done {
+		m.done = true
+		for i := range m.pods {
+			m.pods[i].Node = "moved"
+		}
+		m.store.UpsertPods(m.pods)
+	}
+	return len(p), nil
+}
+
+func TestWriteSnapshotCopiesAfterItStartedWriting(t *testing.T) {
+	// a writer that sees the first bytes before most pods are copied: a
+	// change made then shows in the pods copied later. Building the whole
+	// snapshot first and writing it in chunks would show none of it
+	s := NewStore(15*time.Second, time.Hour)
+	var pods []PodInfo
+	for i := range 240 {
+		r := Round{At: at(i * 15), Pods: map[PodKey]Resource{}}
+		for p := range 50 {
+			k := PodKey{"ns", string(rune('a'+p%26)) + string(rune('a'+p/26))}
+			r.Pods[k] = Resource{CPU: int64(p)}
+			if i == 0 {
+				pods = append(pods, PodInfo{Key: k, Node: "n1"})
+			}
+		}
+		s.Record(r)
+	}
+	s.UpsertPods(pods)
+	var out bytes.Buffer
+	m := &moveOnFirstWrite{store: s, pods: slices.Clone(pods)}
+	if err := s.WriteSnapshot(io.MultiWriter(m, &out)); err != nil {
+		t.Fatal(err)
+	}
+	var got Snapshot
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	moved := 0
+	for _, p := range got.Pods {
+		if p.Info.Node == "moved" {
+			moved++
+		}
+	}
+	if moved == 0 || moved == len(got.Pods) {
+		t.Errorf("%d of %d pods copied after the first write: want some, not all (streamed a pod at a time)", moved, len(got.Pods))
 	}
 }
