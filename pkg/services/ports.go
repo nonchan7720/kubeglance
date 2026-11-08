@@ -7,6 +7,7 @@ package services
 
 import (
 	"context"
+	"io"
 
 	"github.com/nonchan7720/kubeglance/pkg/domain"
 )
@@ -16,14 +17,19 @@ type MetricsSource interface {
 	Poll(ctx context.Context) (domain.Round, error)
 }
 
-// PeerSource fetches the history of a running replica.
+// PeerSource fetches the history of a running replica: Fetch hands read the
+// snapshot as it arrives (domain.Store.ReadSnapshot), so it is merged while
+// it streams in, never held whole.
 type PeerSource interface {
-	Fetch(ctx context.Context) (domain.Snapshot, error)
+	Fetch(ctx context.Context, read func(io.Reader) error) error
 	String() string
 }
 
-// SnapshotStore saves and loads a snapshot (the optional on-disk safety net).
+// SnapshotStore saves and loads a snapshot (the optional on-disk safety
+// net), streamed in both directions like PeerSource: Save hands write the
+// destination (domain.Store.WriteSnapshot), Load hands read the source and
+// reports ok=false when there is none.
 type SnapshotStore interface {
-	Save(snap domain.Snapshot) error
-	Load() (snap domain.Snapshot, ok bool, err error)
+	Save(write func(io.Writer) error) error
+	Load(read func(io.Reader) error) (ok bool, err error)
 }

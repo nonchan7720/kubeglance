@@ -395,10 +395,14 @@ type Snapshot struct {
 	Interval time.Duration `json:"interval"` // current; what a replica without Timeline reads
 	// Timeline is absent in snapshots from replicas that predate it; such a
 	// snapshot is one Interval throughout.
-	Timeline  Timeline       `json:"timeline,omitempty"`
-	Retention time.Duration  `json:"retention"`
-	Pods      []PodSnapshot  `json:"pods"`
-	Nodes     []NodeSnapshot `json:"nodes"`
+	Timeline  Timeline      `json:"timeline,omitempty"`
+	Retention time.Duration `json:"retention"`
+	// Newest is the latest sample instant, so a reader that merges while
+	// it reads can place the timeline before the samples arrive. Absent
+	// from replicas that predate it.
+	Newest time.Time      `json:"newest,omitzero"`
+	Pods   []PodSnapshot  `json:"pods"`
+	Nodes  []NodeSnapshot `json:"nodes"`
 }
 
 // PodSnapshot is one pod in a Snapshot.
@@ -420,25 +424,56 @@ type NodeSnapshot struct {
 	Samples   []Sample  `json:"samples"`
 }
 
-// Snapshot copies the store.
+// Snapshot copies the store. To hand the history to a peer or a file use
+// WriteSnapshot, which does not build the copy in memory.
 func (s *Store) Snapshot() Snapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	snap := Snapshot{TakenAt: time.Now(), Interval: s.timeline.Current(), Timeline: append(Timeline(nil), s.timeline...), Retention: s.retention}
+	h := s.head()
+	snap := Snapshot{TakenAt: h.TakenAt, Interval: h.Interval, Timeline: h.Timeline, Retention: h.Retention, Newest: h.Newest}
 	for _, e := range s.pods {
-		ps := PodSnapshot{Info: e.info, HasInfo: e.hasInfo, DeletedAt: e.deletedAt, Samples: e.series.All()}
-		if len(e.containers) > 0 {
-			ps.Containers = make(map[string][]Sample, len(e.containers))
-			for name, c := range e.containers {
-				ps.Containers[name] = c.All()
-			}
-		}
-		snap.Pods = append(snap.Pods, ps)
+		snap.Pods = append(snap.Pods, podSnapshot(e, time.Time{}))
 	}
 	for _, e := range s.nodes {
-		snap.Nodes = append(snap.Nodes, NodeSnapshot{Info: e.info, HasInfo: e.hasInfo, DeletedAt: e.deletedAt, Samples: e.series.All()})
+		snap.Nodes = append(snap.Nodes, nodeSnapshot(e, time.Time{}))
 	}
 	return snap
+}
+
+// head is a snapshot without pods and nodes; the caller holds the lock.
+func (s *Store) head() snapshotHead {
+	return snapshotHead{TakenAt: time.Now(), Interval: s.timeline.Current(), Timeline: append(Timeline(nil), s.timeline...), Retention: s.retention, Newest: s.newest()}
+}
+
+// podSnapshot copies one pod, its samples up to until (all of them when
+// until is zero); the caller holds the lock.
+func podSnapshot(e *entry[PodInfo], until time.Time) PodSnapshot {
+	ps := PodSnapshot{Info: e.info, HasInfo: e.hasInfo, DeletedAt: e.deletedAt, Samples: upTo(e.series.All(), until)}
+	if len(e.containers) > 0 {
+		ps.Containers = make(map[string][]Sample, len(e.containers))
+		for name, c := range e.containers {
+			ps.Containers[name] = upTo(c.All(), until)
+		}
+	}
+	return ps
+}
+
+// nodeSnapshot is podSnapshot for a node.
+func nodeSnapshot(e *entry[NodeInfo], until time.Time) NodeSnapshot {
+	return NodeSnapshot{Info: e.info, HasInfo: e.hasInfo, DeletedAt: e.deletedAt, Samples: upTo(e.series.All(), until)}
+}
+
+// upTo returns the samples (oldest first) at or before until; all of them
+// when until is zero.
+func upTo(xs []Sample, until time.Time) []Sample {
+	if until.IsZero() {
+		return xs
+	}
+	n := len(xs)
+	for n > 0 && xs[n-1].At.After(until) {
+		n--
+	}
+	return xs[:n]
 }
 
 // Merge adds a snapshot to the store: incoming samples are moved to their
@@ -447,33 +482,88 @@ func (s *Store) Snapshot() Snapshot {
 // the snapshot. Slotting on the way in also collapses the history of a
 // replica that recorded raw poll times (before slots existed), so the first
 // rolling update onto this version does not double the samples either.
+// ReadSnapshot does the same while it reads.
 func (s *Store) Merge(snap Snapshot) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// a peer's timeline in whole seconds; an entry without a step is
-	// ignored rather than turned into a 1 s grid (and 15 times the memory)
+	last := snap.Newest
+	if last.IsZero() {
+		last = newest(snap)
+	}
+	s.mergeTimeline(snap.Timeline, snap.Interval, last)
+	for _, p := range snap.Pods {
+		s.mergePod(p)
+	}
+	for _, n := range snap.Nodes {
+		s.mergeNode(n)
+	}
+}
+
+// mergeTimeline adopts a peer's timeline for the past (see Timeline.merge),
+// in whole seconds; an entry without a step is ignored rather than turned
+// into a 1 s grid (and 15 times the memory). last is the peer's newest
+// sample instant.
+func (s *Store) mergeTimeline(tl Timeline, interval time.Duration, last time.Time) {
 	var in Timeline
-	for _, r := range snap.Timeline {
+	for _, r := range tl {
 		if r.Step > 0 {
 			in = append(in, Resolution{Since: r.Since, Step: wholeSeconds(r.Step)})
 		}
 	}
-	if len(in) == 0 && snap.Interval > 0 {
-		in = Timeline{{Step: wholeSeconds(snap.Interval)}}
+	if len(in) == 0 && interval > 0 {
+		in = Timeline{{Step: wholeSeconds(interval)}}
 	}
-	s.timeline = s.timeline.merge(in, newest(snap))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, cur := s.timeline, s.timeline.Current()
+	// an earlier merge (a copy that broke off, or an older peer) placed
+	// where this store's own interval resumes; while nothing is stored at
+	// or after that boundary it moves on past this peer's newest instant,
+	// so this peer's samples up to last are slotted on the peer's grid
+	if n := len(t); n > 1 && !t[n-1].Since.After(last) && s.newest().Before(t[n-1].Since) {
+		t = t[: n-1 : n-1]
+	}
+	out := t.merge(in, last)
+	if out.Current() != cur {
+		since := later(last, out[len(out)-1].Since).Truncate(cur).Add(cur)
+		out = append(out, Resolution{Since: since, Step: cur})
+	}
+	s.timeline = out
 	s.resize()
-	for _, p := range snap.Pods {
-		e := s.pod(p.Info.Key)
-		e.merge(p.Info, p.HasInfo, p.DeletedAt, s.slotted(p.Samples), s.capacity())
-		for name, samples := range p.Containers {
-			e.container(name, s.capacity()) // so the map entry exists
-			e.containers[name] = mergeSeries(e.containers[name], s.slotted(samples), s.capacity())
+}
+
+// newest is the latest instant any pod or node series holds; the caller
+// holds the lock.
+func (s *Store) newest() time.Time {
+	var t time.Time
+	for _, e := range s.pods {
+		if x, ok := e.series.Last(); ok {
+			t = later(t, x.At)
 		}
 	}
-	for _, n := range snap.Nodes {
-		s.node(n.Info.Name).merge(n.Info, n.HasInfo, n.DeletedAt, s.slotted(n.Samples), s.capacity())
+	for _, e := range s.nodes {
+		if x, ok := e.series.Last(); ok {
+			t = later(t, x.At)
+		}
 	}
+	return t
+}
+
+// mergePod merges one pod of a snapshot under the write lock.
+func (s *Store) mergePod(p PodSnapshot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.pod(p.Info.Key)
+	e.merge(p.Info, p.HasInfo, p.DeletedAt, s.slotted(p.Samples), s.capacity())
+	for name, samples := range p.Containers {
+		e.container(name, s.capacity()) // so the map entry exists
+		e.containers[name] = mergeSeries(e.containers[name], s.slotted(samples), s.capacity())
+	}
+}
+
+// mergeNode merges one node of a snapshot under the write lock.
+func (s *Store) mergeNode(n NodeSnapshot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.node(n.Info.Name).merge(n.Info, n.HasInfo, n.DeletedAt, s.slotted(n.Samples), s.capacity())
 }
 
 // newest is the latest sample instant in a snapshot.
