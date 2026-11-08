@@ -95,13 +95,13 @@ Every row also carries a `spark` object for drawing: about 60 buckets (`bucket` 
 
 ## Memory
 
-A sample is 16 bytes (CPU millicores + memory bytes; the timestamp is shared by the round). At 15 s, 24 h is 5,761 samples per entity:
+A sample is stored in 16 bytes (the instant in whole seconds, CPU millicores, memory bytes; a test keeps it at 16). At 15 s, 24 h is 5,761 samples per entity:
 
 | pods | history (24 h) |
 |---|---|
 | 50 | ~5 MB |
-| 100 | ~9 MB |
-| 300 | ~28 MB |
+| 100 | ~10 MB |
+| 300 | ~30 MB |
 
 A pod with more than one container keeps one more series per container for the Pod screen's breakdown (a single-container pod's series already is its container's), so a pod with one sidecar costs three series instead of one.
 
