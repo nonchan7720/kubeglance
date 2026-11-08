@@ -51,6 +51,7 @@ func NewStore(interval, retention time.Duration) *Store {
 	if interval <= 0 {
 		interval = 15 * time.Second
 	}
+	interval = wholeSeconds(interval)
 	if retention < interval {
 		retention = interval
 	}
@@ -61,6 +62,10 @@ func NewStore(interval, retention time.Duration) *Store {
 		nodes:     map[string]*entry[NodeInfo]{},
 	}
 }
+
+// wholeSeconds rounds an interval to whole seconds, at least one: a Series
+// keeps instants in whole seconds, so the slot grid has to be too.
+func wholeSeconds(d time.Duration) time.Duration { return max(d.Round(time.Second), time.Second) }
 
 // Interval is the sampling interval in effect now.
 func (s *Store) Interval() time.Duration {
@@ -85,7 +90,11 @@ func (s *Store) Timeline() Timeline {
 func (s *Store) SetInterval(interval time.Duration, last time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if interval <= 0 || interval == s.timeline.Current() {
+	if interval <= 0 {
+		return
+	}
+	interval = wholeSeconds(interval)
+	if interval == s.timeline.Current() {
 		return
 	}
 	since := later(last, s.timeline[len(s.timeline)-1].Since).Truncate(interval).Add(interval)
@@ -441,9 +450,16 @@ func (s *Store) Snapshot() Snapshot {
 func (s *Store) Merge(snap Snapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	in := snap.Timeline
+	// a peer's timeline in whole seconds; an entry without a step is
+	// ignored rather than turned into a 1 s grid (and 15 times the memory)
+	var in Timeline
+	for _, r := range snap.Timeline {
+		if r.Step > 0 {
+			in = append(in, Resolution{Since: r.Since, Step: wholeSeconds(r.Step)})
+		}
+	}
 	if len(in) == 0 && snap.Interval > 0 {
-		in = Timeline{{Step: snap.Interval}}
+		in = Timeline{{Step: wholeSeconds(snap.Interval)}}
 	}
 	s.timeline = s.timeline.merge(in, newest(snap))
 	s.resize()

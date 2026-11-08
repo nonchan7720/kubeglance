@@ -298,3 +298,36 @@ func TestStoreSize(t *testing.T) {
 		t.Errorf("Size = %+v, want %+v", got, want)
 	}
 }
+
+func TestStoreIntervalIsWholeSeconds(t *testing.T) {
+	// a series keeps instants in whole seconds, so the slot grid must be
+	// whole seconds too: a sub-second interval is rounded (at least 1 s)
+	for _, c := range []struct{ in, want time.Duration }{
+		{15 * time.Second, 15 * time.Second},
+		{1500 * time.Millisecond, 2 * time.Second},
+		{400 * time.Millisecond, time.Second},
+		{10*time.Second + 300*time.Millisecond, 10 * time.Second},
+	} {
+		if got := NewStore(c.in, time.Hour).Interval(); got != c.want {
+			t.Errorf("NewStore(%v): interval %v, want %v", c.in, got, c.want)
+		}
+		s := NewStore(30*time.Second, time.Hour)
+		s.SetInterval(c.in, at(0))
+		if got := s.Interval(); got != c.want {
+			t.Errorf("SetInterval(%v): interval %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func TestStoreMergeTakesAPeerTimelineInWholeSeconds(t *testing.T) {
+	s := NewStore(15*time.Second, time.Hour)
+	s.Merge(Snapshot{Timeline: Timeline{{Step: 0}, {Since: at(60), Step: 15*time.Second + 200*time.Millisecond}}})
+	for _, r := range s.Timeline() {
+		if r.Step <= 0 || r.Step%time.Second != 0 {
+			t.Errorf("timeline %v has a step that is not whole seconds", s.Timeline())
+		}
+	}
+	if c := s.Capacity(); c != 241 {
+		t.Errorf("capacity = %d, want 241 (1 h at 15 s)", c)
+	}
+}
