@@ -385,3 +385,19 @@ func TestLogoIsTheAppIcon(t *testing.T) {
 		}
 	}
 }
+
+// TestHeaderShowsTheLogo: the title in the header carries the logo (the
+// app icon, the same file), not text alone.
+func TestHeaderShowsTheLogo(t *testing.T) {
+	html, err := static.ReadFile("static/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	title := between(string(html), `<div class="title">`, `</div>`)
+	if len(title) == 0 {
+		t.Fatal("no header title in index.html")
+	}
+	if !strings.Contains(title[0], `<img class="logo" src="icon.svg"`) {
+		t.Errorf("header title has no logo:\n%s", title[0])
+	}
+}

@@ -303,7 +303,7 @@
         dot.title = s.collector.healthy ? t('collecting', s.interval / 1e9, s.version) : t('collector.bad', s.collector.lastError || t('no.data'));
         state.interval = Math.max(5000, s.interval / 1e6);
       }
-      $('#updated').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      $('#updated').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
     } catch (e) {
       main.innerHTML = `<p class="muted">${t('load.fail')}: ${esc(e.message)}</p>`;
     }

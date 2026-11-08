@@ -48,10 +48,11 @@ header { position: sticky; top: 0; z-index: 2; background: var(--bg);
   display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 header h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: 0.2px; }
 .title { display: flex; align-items: center; gap: 8px; }
+.logo { display: block; width: 24px; height: 24px; flex: none; margin-right: -2px; }
 .status { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
 .status.ok { background: var(--ok); } .status.bad { background: var(--hot); }
 .controls { display: flex; align-items: center; gap: 8px; }
-.updated { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.updated { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .lang { background: var(--card); color: var(--muted); border: 1px solid var(--line); border-radius: 8px;
   padding: 6px 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; }
 select { background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 8px;
