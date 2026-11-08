@@ -9,6 +9,8 @@ helm = "3.19.0"
 # dependency-graph analysis (.depgraph.yml): the claude-hook-gate session_start /
 # gate entries and CI (depgraph:ci) use it
 "github:nonchan7720/depgraph" = "0.1.7"
+# THIRD_PARTY_NOTICES.md (mise run notices; CI checks it is current)
+"go:github.com/google/go-licenses/v2" = "2.0.1"
 
 [env]
 # pure Go, static binary; cross-compiles with plain `go build`
@@ -72,9 +74,20 @@ run = "go test -race -count=1 ./..."
 # (PDB, NetworkPolicy) and checks what comes out
 run = ["helm lint charts/kubeglance", "helm template kubeglance charts/kubeglance >/dev/null", "bash charts/tests/render.sh"]
 
+[tasks.notices]
+description = "Regenerate THIRD_PARTY_NOTICES.md from the modules the binary links (every release GOOS)"
+run = "bash scripts/notices.sh > THIRD_PARTY_NOTICES.md"
+
+[tasks."notices:check"]
+description = "Fail when THIRD_PARTY_NOTICES.md is stale or a dependency has a forbidden / restricted license"
+run = [
+  "for os in linux darwin windows; do GOOS=$os go-licenses check . --ignore github.com/nonchan7720/kubeglance --disallowed_types=forbidden,restricted 2>/dev/null || { echo \"forbidden or restricted license for GOOS=$os\"; exit 1; }; done",
+  'bash scripts/notices.sh | diff -u THIRD_PARTY_NOTICES.md - >/dev/null || { echo "THIRD_PARTY_NOTICES.md is stale: run mise run notices"; exit 1; }',
+]
+
 [tasks.ci]
 description = "Everything CI runs"
-depends = ["lint", "test", "helm:lint", "build"]
+depends = ["lint", "test", "helm:lint", "build", "notices:check"]
 
 # ---------------------------------------------------------------------------
 # depgraph (dependency analysis; Neo4j from compose.yaml)

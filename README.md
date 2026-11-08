@@ -123,7 +123,8 @@ The layers are enforced by [depgraph](https://github.com/nonchan7720/depgraph) (
 
 ```bash
 mise install         # Go, golangci-lint, helm, goreleaser (pinned in mise.toml)
-mise run ci          # lint (incl. govet) + test + helm lint + build
+mise run ci          # lint (incl. govet) + test + helm lint + build + notices check
+mise run notices     # regenerate THIRD_PARTY_NOTICES.md after adding a dependency
 mise run dev         # UI with synthetic data at http://127.0.0.1:8080
 mise run run         # against your current kubeconfig context
 mise run depgraph:watch   # dependency graph + findings (needs Docker for Neo4j)
