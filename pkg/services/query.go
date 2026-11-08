@@ -41,11 +41,18 @@ func (q *Query) window(d time.Duration) (domain.Window, WindowInfo) {
 	if d > q.store.Retention() {
 		d = q.store.Retention()
 	}
-	to := q.now()
-	// the timeline, so a window spanning a change of metrics-server's
-	// resolution expects each part's samples at its own step
-	w := domain.Window{From: to.Add(-d), To: to, Step: q.store.Interval(), Timeline: q.store.Timeline()}
+	w := dueWindow(q.store, d, q.now())
 	return w, WindowInfo{From: w.From, To: w.To, Duration: d, Step: w.Step}
+}
+
+// dueWindow is the window of length d that ends at the newest instant whose
+// poll is due: the collector polls a slot in its middle (nextPoll), so the
+// current slot is not a gap before then. A poll that is due and missing is.
+// It carries the timeline, so a window spanning a change of metrics-server's
+// resolution expects each part's samples at its own step.
+func dueWindow(store *domain.Store, d time.Duration, now time.Time) domain.Window {
+	to := now.Add(-store.Interval() / 2)
+	return domain.Window{From: to.Add(-d), To: to, Step: store.Interval(), Timeline: store.Timeline()}
 }
 
 // ClusterView answers "how much headroom is left?".
