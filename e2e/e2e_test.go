@@ -126,14 +126,21 @@ func TestViews(t *testing.T) {
 	}
 	nNodes := len(nodes.Items)
 
-	var status struct {
-		Interval time.Duration `json:"interval"`
-	}
-	eventually(t, time.Minute, "status", func() error { return api("", "/api/v1/status", nil, &status) })
-	// auto mode follows metrics-server's --metric-resolution (15s)
-	if status.Interval != 15*time.Second {
-		t.Errorf("interval = %s, want metrics-server's 15s", status.Interval)
-	}
+	// auto mode follows metrics-server's --metric-resolution (15s), not the
+	// window it reports (20 s and 10 s on kind); the start-up estimate may
+	// need a few rounds to settle
+	eventually(t, 2*time.Minute, "interval", func() error {
+		var status struct {
+			Interval time.Duration `json:"interval"`
+		}
+		if err := api("", "/api/v1/status", nil, &status); err != nil {
+			return err
+		}
+		if status.Interval != 15*time.Second {
+			return fmt.Errorf("interval = %s, want metrics-server's 15s", status.Interval)
+		}
+		return nil
+	})
 
 	// every kind of owner resolves; the CronJob's first Job starts within a
 	// minute of the install
@@ -286,13 +293,16 @@ func count(alerts []alert, status string) int {
 
 func TestAlerts(t *testing.T) {
 	ctx := context.Background()
-	limit := resource.MustParse("128Mi")
+	limit := resource.MustParse("256Mi")
 	hog := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "hog", Namespace: appNS},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{
 			Name: "hog", Image: "kubeglance-e2e-helper:e2e", ImagePullPolicy: corev1.PullNever,
-			// 112 MiB plus the Go runtime: over 90 % of 128 MiB, under the OOM kill
-			Args: []string{"hog", "112"},
+			// 236 MiB plus the Go runtime is about 93 % of 256 MiB: over the
+			// 90 % threshold (230.4 MiB), 17 MiB below the OOM kill. The
+			// binary's own pages are file-backed and may not count in the
+			// working set, so the margin is not taken from them
+			Args: []string{"hog", "236"},
 			Resources: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceMemory: limit, corev1.ResourceCPU: resource.MustParse("5m")},
 				Limits:   corev1.ResourceList{corev1.ResourceMemory: limit},
@@ -314,7 +324,7 @@ func TestAlerts(t *testing.T) {
 			return err
 		}
 		if count(got, "firing") == 0 {
-			return fmt.Errorf("no firing alert yet (%d for the hog)", len(got))
+			return fmt.Errorf("no firing alert yet (%d for the hog); kubeglance sees %s", len(got), hogView())
 		}
 		return nil
 	})
@@ -328,7 +338,7 @@ func TestAlerts(t *testing.T) {
 		t.Errorf("the firing alert arrived %d times, want once with two replicas", n)
 	}
 	a := got[slices.IndexFunc(got, func(a alert) bool { return a.Status == "firing" })]
-	if a.URL != "https://kubeglance.e2e.example/?pod=e2e%2Fhog" || a.Verdict.Condition.Total != 128*mib || !strings.HasPrefix(a.Title, "hog: memory at ") {
+	if a.URL != "https://kubeglance.e2e.example/?pod=e2e%2Fhog" || a.Verdict.Condition.Total != 256*mib || !strings.HasPrefix(a.Title, "hog: memory at ") {
 		t.Errorf("firing alert = %+v", a)
 	}
 	for _, ua := range agents {
@@ -363,6 +373,29 @@ func TestAlerts(t *testing.T) {
 	if r := got[len(got)-1]; r.Status != "resolved" || !r.Gone {
 		t.Errorf("last alert = %+v, want a resolve for a gone pod", r)
 	}
+}
+
+// hogView is kubeglance's view of the hog's memory, for a failure message.
+func hogView() string {
+	var v struct {
+		Pod struct {
+			Limits struct {
+				Memory int64 `json:"memory"`
+			} `json:"limits"`
+			Usage struct {
+				Now      struct{ Memory int64 } `json:"now"`
+				Median   struct{ Memory int64 } `json:"median"`
+				Samples  int                    `json:"samples"`
+				Expected int                    `json:"expected"`
+			} `json:"usage"`
+		} `json:"pod"`
+	}
+	if err := api("", "/api/v1/pods/"+appNS+"/hog", map[string]string{"window": "1m"}, &v); err != nil {
+		return err.Error()
+	}
+	u := v.Pod.Usage
+	return fmt.Sprintf("memory now %.1f MiB, median %.1f MiB of a %d MiB limit, %d/%d samples over 1m",
+		float64(u.Now.Memory)/mib, float64(u.Median.Memory)/mib, v.Pod.Limits.Memory/mib, u.Samples, u.Expected)
 }
 
 // coverage is the share of the last three minutes a replica holds samples
