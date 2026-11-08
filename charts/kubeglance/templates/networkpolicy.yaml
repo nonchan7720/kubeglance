@@ -3,7 +3,7 @@
 # Ingress: the peers (history copy) and whatever networkPolicy.ingressFrom
 # names, on the HTTP port. Egress: DNS, the Kubernetes API server (which also
 # serves metrics.k8s.io; kubeglance never talks to metrics-server or kubelets
-# directly) and the peers.
+# directly), the peers and, with alerts on, the receiver.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -56,4 +56,18 @@ spec:
       ports:
         - port: 8080
           protocol: TCP
+    {{- if include "kubeglance.alerts" . }}
+    - ports:
+        {{- range .Values.alerts.egress.ports }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+      {{- with .Values.alerts.egress.cidrs }}
+      to:
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
 {{- end }}

@@ -48,6 +48,39 @@ auth:
   existingSecret: ""
   key: token
 
+# Optional alerts: a webhook is told when a container stays near its limit
+# (memory: the OOM kill; CPU: throttling) or a node near its allocatable for
+# at least half of `window`, and again when that is over. Off until a
+# receiver is set (webhook, or urlKey). Every replica evaluates; one sends.
+alerts:
+  # The receiver's URL. When the URL itself is a credential (a Slack-style
+  # webhook), leave this empty and put it in existingSecret under urlKey.
+  webhook: ""
+  # json: kubeglance's own JSON, every alert of a round in one request.
+  # pushshell: one pushshell notification per alert (POST /v1/notifications).
+  format: json
+  # A Secret you created holding the URL (urlKey) and/or headers
+  # (headersKey: "Name: value" lines), for example a pushshell API key:
+  #   kubectl -n kubeglance create secret generic kubeglance-alerts --from-literal=headers='X-API-Key: ...'
+  existingSecret: ""
+  urlKey: ""
+  headersKey: ""
+  # Where a phone reaches kubeglance (https://...); alerts link to their pod
+  # or node. Empty: no links.
+  publicURL: ""
+  # Language of the notification text: en | ja.
+  language: en
+  window: 10m
+  # Thresholds as a fraction of the limit / allocatable; 0 disables.
+  memory: 0.9
+  cpu: 0.9
+  # With networkPolicy.enabled: egress to the receiver on these ports.
+  # Empty cidrs allow them to any address; pin the receiver's for a tighter
+  # policy.
+  egress:
+    cidrs: []
+    ports: [443]
+
 service:
   type: ClusterIP
   port: 80

@@ -20,6 +20,7 @@ Every number is shown as **now · average · median · p95** over a window (5 m 
 - **Zero-downtime updates with no history loss.** With two replicas a starting replica copies the history from the running one before it becomes Ready. See [How updates keep the history](#how-updates-keep-the-history).
 - **Mobile first.** A PWA you add to your home screen. Put it behind Tailscale, Cloudflare Tunnel or an authenticating Ingress and check your homelab from the train.
 - **English and Japanese UI.** Follows the browser language; `?lang=ja` / `?lang=en` or the EN/JA button overrides it, remembered per device.
+- **Alerts to your phone, optional.** A webhook hears when a container stays near its memory or CPU limit, or a node near its allocatable, for at least half of the last 10 minutes, and again when it is over. See [Alerts](#alerts).
 - **Read-only, tiny footprint.** list/watch on pods, nodes, replicasets, jobs and the metrics API; 20 m CPU and 64 Mi memory requested.
 
 > Status: early. The core (collector, history, four-level API, UI, Helm chart) works; see [TODO.md](TODO.md) for what is next.
@@ -51,6 +52,36 @@ helm upgrade kubeglance oci://ghcr.io/nonchan7720/charts/kubeglance -n kubeglanc
 
 The browser then asks for a user name (anything) and a password (the token) once. API clients and Prometheus can send `Authorization: Bearer <token>`. `/healthz`, `/readyz`, the web manifest and the icon stay open for the probes and for adding the app to a home screen. The replicas send the token to each other for the history copy. The token is read from a file (the mounted Secret), never from a flag, and the startup log only says whether one is set.
 
+### Alerts
+
+Off by default. Give kubeglance a webhook and it posts when, for at least half of `--alert-window` (10 minutes by default):
+
+| rule | compares | means |
+|---|---|---|
+| `container-memory` | a container's memory with its limit | the OOM kill is near |
+| `container-cpu` | a container's CPU with its limit | it is being throttled |
+| `node-memory` / `node-cpu` | a node's usage with its allocatable | the node is full |
+
+at or above the threshold (`--alert-memory`, `--alert-cpu`: 90 % by default; 0 turns a resource off), and once more when it is over (`resolved`, also when the pod or node is gone). "Half of the window", not "now": a sustained problem fires through a dip or two, a single spike does not, and the alert resolves only once most of the window is calm again. Samples missing from the window count as below, so a gap delays an alert but never raises one. A container without a limit is never compared; a pod with several containers is checked per container, since the OOM kill is per container.
+
+```bash
+helm upgrade kubeglance oci://ghcr.io/nonchan7720/charts/kubeglance -n kubeglance --reuse-values \
+  --set alerts.webhook=https://receiver.example.com/kubeglance \
+  --set alerts.publicURL=https://kubeglance.example.ts.net   # alerts link to their pod or node
+```
+
+`--alert-format=json` (the default) sends every change of one evaluation in one request, `{"version": 1, "alerts": [...]}`; each alert has its `key` (rule and target), `status` (`firing` / `resolved`), `since`, `at`, `gone`, the `verdict` (threshold, limit, the window's now / avg / median / p95 and coverage), a ready-made `title` and `body` (`--alert-language=en|ja`) and a `url`. `--alert-format=pushshell` sends each alert as a notification to a [pushshell](https://github.com/nonchan7720/pushshell) backend (`POST /v1/notifications`, to the login ID `kubeglance`; the resolve replaces the firing on the phone); more than three at once become one summary. Opened inside a pushshell app, the kubeglance UI registers the phone under that login ID by itself. Headers such as an API key come from a Secret, never a value:
+
+```bash
+kubectl -n kubeglance create secret generic kubeglance-alerts --from-literal=headers='X-API-Key: ...'
+helm upgrade ... --set alerts.format=pushshell --set alerts.webhook=https://push.example.com/v1/notifications \
+  --set alerts.existingSecret=kubeglance-alerts --set alerts.headersKey=headers
+```
+
+When the URL itself is a credential (a Slack-style webhook), put it in the same Secret and set `alerts.urlKey` instead of `alerts.webhook`; the startup log shows only its scheme and host. With `networkPolicy.enabled` the chart adds egress to the receiver (`alerts.egress`).
+
+Every replica evaluates the rules over the same history and reaches the same verdicts; only the Ready replica with the lowest pod IP sends, so two replicas do not notify twice and no write access to the API server is needed. When it goes away, the other one carries on without repeating what was already sent. A failed delivery is retried with the next evaluation. One limit of keeping no state outside memory: a replica that starts next to a running one assumes that one already sent what fires at that moment, so alerts that already fire when alerts are first switched on are not sent until they fire again.
+
 Binaries for linux / darwin / windows (amd64, arm64, armv7) are on [Releases](https://github.com/nonchan7720/kubeglance/releases); run `kubeglance --kubeconfig ~/.kube/config` outside the cluster.
 
 ## Configuration
@@ -70,6 +101,14 @@ Flags, or the environment variable in brackets; a flag on the command line wins 
 | `--shutdown-grace` (`KUBEGLANCE_SHUTDOWN_GRACE`) | `5s` | keep serving after SIGTERM so a new replica can finish copying |
 | `--bootstrap-timeout` (`KUBEGLANCE_BOOTSTRAP_TIMEOUT`) | `2m` | how long a starting replica retries copying the history while peers exist but none answers; it is not Ready meanwhile |
 | `--auth-token-file` (`KUBEGLANCE_AUTH_TOKEN_FILE`) | | file with a token required on the UI, the API, `/metrics` and the peer copy; off when empty. See [Access](#access) |
+| `--alert-webhook` (`KUBEGLANCE_ALERT_WEBHOOK`) | | URL that receives alerts; empty disables them. See [Alerts](#alerts) |
+| `--alert-format` (`KUBEGLANCE_ALERT_FORMAT`) | `json` | `json` (every alert in one request) or `pushshell` (a pushshell notification per alert) |
+| `--alert-headers-file` (`KUBEGLANCE_ALERT_HEADERS_FILE`) | | file with `Name: value` lines sent with every alert, such as an API key |
+| `--alert-window` (`KUBEGLANCE_ALERT_WINDOW`) | `10m` | a rule fires when at least half of this window is at or above its threshold |
+| `--alert-memory` (`KUBEGLANCE_ALERT_MEMORY`) | `0.9` | memory threshold, a fraction of a container's limit and a node's allocatable; `0` disables |
+| `--alert-cpu` (`KUBEGLANCE_ALERT_CPU`) | `0.9` | the same for CPU |
+| `--alert-language` (`KUBEGLANCE_ALERT_LANGUAGE`) | `en` | language of the alert text: `en` / `ja` |
+| `--public-url` (`KUBEGLANCE_PUBLIC_URL`) | | where a phone reaches kubeglance; alerts link to `?pod=namespace/name` or `?node=name` there |
 | `--kubeconfig` | | out-of-cluster; else in-cluster, `$KUBECONFIG`, `~/.kube/config` |
 | `--log-level` (`KUBEGLANCE_LOG_LEVEL`) | `info` | `debug` / `info` / `warn` / `error` (JSON to stderr) |
 
@@ -126,9 +165,9 @@ The optional `--snapshot` file (`snapshot.enabled` in the chart) is a safety net
 
 ```
 main.go              wires everything
-pkg/domain           samples, the ring-buffer Series, Stats (avg / median / p95 / coverage), Store, aggregation. No Kubernetes.
-pkg/services         Collector (poll → store), Query (the four views), Bootstrap (peers, disk), Persister
-pkg/infrastructure   k8s (metrics.k8s.io poll, informers for pod → owner, node), peer (HTTP), snapshot (file)
+pkg/domain           samples, the ring-buffer Series, Stats (avg / median / p95 / coverage), Store, aggregation, alert rules. No Kubernetes.
+pkg/services         Collector (poll → store), Query (the four views), Bootstrap (peers, disk), Persister, Alerter
+pkg/infrastructure   k8s (metrics.k8s.io poll, informers for pod → owner, node), peer (HTTP, alert sender election), snapshot (file), webhook (alerts)
 pkg/interfaces       the command line (cobra: flags, env) and the HTTP API with the embedded UI (plain HTML / CSS / JS, no build, no CDN)
 charts/kubeglance    Helm chart
 internal/devserver   `mise run dev`: the UI with synthetic data, no cluster needed

@@ -10,6 +10,7 @@ A Claude Code cloud container cannot do this part: `dockerd` starts and the k3s 
 - [ ] `helm install` from `charts/kubeglance` with `replicaCount: 2`; confirm `/readyz` flips only after the peer copy + first poll.
 - [ ] Rolling update test: change the image tag, watch `kubectl get pods -w`, then check `GET /api/v1/cluster?window=1h` has `coverage: 1` on the new pod. This is the headline claim of the README; it must be measured, not assumed.
 - [ ] Measure real memory with `kubectl top pod` after 24 h and update the README table if it is off.
+- [ ] Alerts end to end: point `--alert-webhook` at a receiver (`--alert-format=json` to a request bin, then `pushshell` to a pushshell backend with the app on a phone), push a pod to its memory limit (`stress-ng --vm 1 --vm-bytes 95%`), and confirm one firing, one resolve, the link opening the pod, and no second notification with `replicaCount: 2` during a rolling update.
 - [ ] Confirm the preStop `sleep` action works on the owner's k3s version (needs ≥ 1.30); otherwise document `preStopSleepSeconds: 0` more loudly.
 
 ## 1. First release
@@ -40,6 +41,7 @@ A Claude Code cloud container cannot do this part: `dockerd` starts and the k3s 
 - [x] NetworkPolicy template (ingress from the replicas + `networkPolicy.ingressFrom`; egress to DNS, the API server and the replicas). Off by default. `charts/tests/render.sh` checks the renders; it has not been applied to a real CNI yet, see §0.
 - [x] Structured startup log line that prints the effective config (`starting` → `config`; a test fails when a `Config` field is not logged).
 
+- [x] **Alerts** (owner decision, 2026-11: in scope, delivered by webhook): container memory / CPU against its limit, node against allocatable, firing when at least half of `--alert-window` is at or above the threshold; `json` or `pushshell` format; one sender among the replicas (lowest pod IP), no write RBAC. Not yet: per-namespace include / exclude, a repeat interval for long-firing alerts, `/metrics` for deliveries, Slack / Discord / ntfy formats (the `json` body has `title` / `body` for a small adapter until then).
 - [x] Poll interval follows metrics-server's `--metric-resolution` (read from the `window` every poll reports), also when it changes while kubeglance runs, so managed clusters with another resolution are polled at theirs. `--interval` fixes it.
 
 ## 4. Toward the CNCF Landscape

@@ -60,8 +60,39 @@ contains "$env" "resourceFieldRef:" "memory limit env from the downward API"
 contains "$env" "resource: limits.memory" "memory limit env is limits.memory"
 hasnt_text "$env" "divisor" "memory limit env in bytes"
 
+# alerts: off by default; a plain URL goes in an env var, never a flag
+out=$(doc Deployment)
+hasnt_text "$out" "KUBEGLANCE_ALERT_WEBHOOK" "defaults alerts"
+hasnt_text "$out" "--alert-" "defaults alert flags"
+out=$(doc Deployment --set alerts.webhook=https://push.example.com/v1/notifications --set alerts.format=pushshell \
+  --set alerts.publicURL=https://kg.example --set alerts.language=ja)
+contains "$out" "name: KUBEGLANCE_ALERT_WEBHOOK" "alerts webhook env"
+contains "$out" 'value: "https://push.example.com/v1/notifications"' "alerts webhook value"
+contains "$out" "--alert-format=pushshell" "alerts format"
+contains "$out" "--alert-window=10m" "alerts window"
+contains "$out" "--alert-memory=0.9" "alerts memory"
+contains "$out" "--alert-language=ja" "alerts language"
+contains "$out" "--public-url=https://kg.example" "alerts public URL"
+hasnt_text "$out" "--alert-headers-file" "alerts without headers"
+# the URL and headers from a Secret the user created
+out=$(doc Deployment --set alerts.existingSecret=kg-alerts --set alerts.urlKey=url --set alerts.headersKey=headers)
+contains "$out" "secretKeyRef:" "alerts URL from the Secret"
+contains "$out" "key: url" "alerts urlKey"
+contains "$out" "--alert-headers-file=/etc/kubeglance/alerts/headers" "alerts headers flag"
+contains "$out" "mountPath: /etc/kubeglance/alerts" "alerts headers mount"
+contains "$out" "secretName: kg-alerts" "alerts headers volume"
+# a Secret without a URL key is not a receiver
+hasnt_text "$(doc Deployment --set alerts.existingSecret=kg-alerts --set alerts.headersKey=headers)" "--alert-" "alerts Secret without urlKey"
+# NetworkPolicy: egress to the receiver only with alerts on
+# (8443, not the default 443, which the API server rule has as well)
+hasnt_text "$(doc NetworkPolicy --set networkPolicy.enabled=true --set 'alerts.egress.ports[0]=8443')" "port: 8443" "networkPolicy without alerts"
+out=$(doc NetworkPolicy --set networkPolicy.enabled=true --set alerts.webhook=https://h --set 'alerts.egress.ports[0]=8443' --set 'alerts.egress.cidrs[0]=203.0.113.7/32')
+contains "$out" "cidr: 203.0.113.7/32" "networkPolicy alerts egress"
+contains "$out" "port: 8443" "networkPolicy alerts port"
+
 # every combination above also lints
-for set in "" "--set replicaCount=1" "--set networkPolicy.enabled=true" "--set auth.existingSecret=kg-auth --set snapshot.enabled=true"; do
+for set in "" "--set replicaCount=1" "--set networkPolicy.enabled=true" "--set auth.existingSecret=kg-auth --set snapshot.enabled=true" \
+  "--set alerts.existingSecret=kg-alerts --set alerts.urlKey=url --set alerts.headersKey=headers --set auth.existingSecret=kg-auth --set networkPolicy.enabled=true"; do
   # shellcheck disable=SC2086 # word splitting is the point
   helm lint --quiet "$chart" $set >/dev/null || { echo "FAIL: helm lint $set"; fail=1; }
 done

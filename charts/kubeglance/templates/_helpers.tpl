@@ -34,3 +34,17 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Alerts are on when a receiver is configured, as a value or from a Secret.
+*/}}
+{{- define "kubeglance.alerts" -}}
+{{- if or .Values.alerts.webhook (and .Values.alerts.existingSecret .Values.alerts.urlKey) -}}true{{- end -}}
+{{- end }}
+
+{{/*
+Alert headers come from the Secret when both are named.
+*/}}
+{{- define "kubeglance.alertHeaders" -}}
+{{- if and (include "kubeglance.alerts" .) .Values.alerts.existingSecret .Values.alerts.headersKey -}}true{{- end -}}
+{{- end }}

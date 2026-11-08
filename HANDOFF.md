@@ -31,6 +31,7 @@ Everything below builds, passes `go vet`, `golangci-lint run` (2.15.0, 0 issues)
 | Peer discovery (headless Service) + snapshot fetch | `pkg/infrastructure/peer/peer.go` | done, tested with httptest |
 | Snapshot file (gzip JSON, atomic rename) | `pkg/infrastructure/snapshot/file.go` | done, tested |
 | HTTP API + embedded UI (4 screens, drill-down node→pods, workload→pods, pod→containers, window selector, sparklines with gaps, namespace filter, sort toggle, PWA manifest, en/ja i18n, gzip) | `pkg/interfaces/handler/**` | done; UI checked by screenshot at 375 px (dark and light, en and ja); DICT key parity is a Go test |
+| Alerts: rules + delivery state (`domain/alert.go`), Alerter (`services/alert.go`, runs after every collector round), sender election (`peer/sender.go`), webhook `json` / `pushshell` (`infrastructure/webhook`), UI deep links `?pod=` / `?node=` and pushshell registration, chart `alerts.*` | `pkg/**/alert*.go`, `pkg/infrastructure/webhook`, `app.js` | done, tested; not yet run against a real receiver (TODO §0) |
 | `main.go` wiring, graceful shutdown; cobra command, flags/env | `main.go`, `pkg/interfaces/cmd.go` | done |
 | Synthetic-data dev server (`mise run dev`) | `internal/devserver/main.go` | done |
 | Helm chart (Deployment w/ RollingUpdate + preStop sleep, Service + headless `-peers`, RBAC read-only, optional PVC, Ingress) | `charts/kubeglance` | done, lints and renders |
@@ -86,6 +87,11 @@ mise run run                    # real cluster via your kubeconfig
 - **The auth token is a secret**: it comes only from `--auth-token-file`, `Config.LogValue` writes `authToken: set|none`, never the value, and a test checks it. `/healthz`, `/readyz`, the manifest and the icon are open on purpose (`open` in `handler.go`): add a path there only if it shows no cluster data. Peers send the same token (`peer.NewClient`).
 - **`Limits` is zeroed when any container has no limit** (`podInfo`): a pod is only as limited as its least limited container. The UI then shows "% of request" instead.
 - **One brand mark.** `docs/logo.svg` (a kingfisher) is byte for byte the UI icon `static/icon.svg`; `docs/wordmark.svg` / `docs/wordmark-on-dark.svg` and the UI header's `static/wordmark.svg` (one file for both themes, its viewBox centred on the letters) draw its paths unchanged plus the name as outlines and the sparkline it perches on. `docs/logo.svg` is the master drawing (no generator): edit it, copy it to the icon, then rerun `scripts/wordmark.py` (its docstring has the pinned versions and the font); `ui_test.go` fails on any drift.
+
+- **Alerts are evaluated by every replica and sent by one.** `peer.Sender` picks the Ready replica with the lowest pod IP from the headless Service; the others mark what fires as delivered (`Alerts.Delivered`), so a hand-over repeats nothing. A replica's first evaluation with peers present assumes they already sent what fires (there is no shared alert state; the README says what that costs). Keep it free of API-server writes: a Lease would need write RBAC and break "read-only".
+- **`domain.Alerts` is level-triggered.** `Pending` is "state differs from what the receiver was told"; delivery failures are retries for free. `Delivered` ignores an alert whose status changed since `Pending`. A rule's verdict counts gaps as below (`Evaluate`): never make a gap fire an alert, and never shrink the window to the samples present.
+- **The webhook URL and headers are secrets.** The URL is logged and put in errors as scheme + host only (`redactURL` in `cmd.go`, `webhook.Redact`); the chart passes it as an env var (or from a Secret), never a flag. Headers come only from `--alert-headers-file`.
+- **pushshell's login ID is `kubeglance`** (`webhook.LoginID` and `PUSHSHELL_LOGIN` in `app.js`): change both or neither. pushshell's `collapseKey` allows 64 characters, hence the hash.
 
 ## Branch rulesets
 
