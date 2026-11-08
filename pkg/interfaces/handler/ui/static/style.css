@@ -46,11 +46,18 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 header { position: sticky; top: 0; z-index: 2; background: var(--bg);
   padding: calc(env(safe-area-inset-top) + 10px) var(--pad) 8px; border-bottom: 1px solid var(--line);
   display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-header h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: 0.2px; }
+header h1 { font-size: 17px; line-height: 1; margin: 0; font-weight: 650; letter-spacing: 0.2px; }
 .title { display: flex; align-items: center; gap: 8px; }
-.logo { display: block; width: 24px; height: 24px; flex: none; margin-right: -2px; }
-.status { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
-.status.ok { background: var(--ok); } .status.bad { background: var(--hot); }
+.logo { display: block; width: 24px; height: 24px; flex: none; }
+.status { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; flex: none;
+  padding: 0; border: 0; background: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.dot { display: block; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.ok .dot { background: var(--ok); } .bad .dot { background: var(--hot); }
+.statuspanel { margin: 8px var(--pad) 0; padding: 10px 12px; background: var(--card); border: 1px solid var(--line);
+  border-radius: 10px; font-size: 13px; color: var(--muted); }
+.statuspanel.bad { border-color: var(--hot); }
+.statuspanel p { margin: 2px 0; }
+.statuspanel .st-head { display: flex; align-items: center; gap: 8px; color: var(--fg); font-weight: 650; font-size: 14px; margin-bottom: 4px; }
 .controls { display: flex; align-items: center; gap: 8px; }
 .updated { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .lang { background: var(--card); color: var(--muted); border: 1px solid var(--line); border-radius: 8px;

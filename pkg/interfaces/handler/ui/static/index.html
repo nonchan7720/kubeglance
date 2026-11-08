@@ -18,7 +18,7 @@
   <div class="title">
     <img class="logo" src="icon.svg" alt="" width="24" height="24">
     <h1>kubeglance</h1>
-    <span id="status" class="status" title="collector" role="img" aria-label="collector"></span>
+    <button id="status" class="status" type="button" aria-expanded="false" aria-controls="statuspanel" data-i18n-label="st.label"><span class="dot"></span></button>
   </div>
   <div class="controls">
     <button id="lang" class="lang" aria-label="language">EN</button>
@@ -32,6 +32,7 @@
     <span id="updated" class="updated"></span>
   </div>
 </header>
+<div id="statuspanel" class="statuspanel" role="status" hidden></div>
 
 <nav id="tabs">
   <button data-level="cluster" class="active" data-i18n="tab.cluster">Cluster</button>
