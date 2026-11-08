@@ -2,7 +2,8 @@ package interfaces
 
 import "strconv"
 
-// GoMemoryLimit is the soft memory limit for the Go runtime: 90 % of the
+// GoMemoryLimit is the soft memory limit for the Go runtime (a target for
+// the garbage collector, not a cap on live memory): 90 % of the
 // container's memory limit, which the chart passes in bytes as
 // KUBEGLANCE_MEMORY_LIMIT (downward API). Without it the garbage collector
 // only looks at the live heap and lets garbage grow to twice that, past the

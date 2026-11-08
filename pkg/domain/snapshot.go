@@ -35,12 +35,21 @@ type SnapshotInfo struct {
 // stored samples) on the replica that is serving it, during a rolling
 // update, while it keeps collecting. An entity removed meanwhile is left
 // out; each one is consistent in itself, which is all Merge needs.
+//
+// Samples recorded after the header was taken (newer than its "newest") are
+// left out, as if the snapshot had been taken at once: they may sit on a
+// grid the header's timeline does not describe yet (the interval changed
+// meanwhile), and the reader slots by that timeline.
 func (s *Store) WriteSnapshot(w io.Writer) error {
 	s.mu.RLock()
 	head := s.head()
 	pods := slices.Collect(maps.Keys(s.pods))
 	nodes := slices.Collect(maps.Keys(s.nodes))
 	s.mu.RUnlock()
+	until := head.Newest
+	if until.IsZero() { // no samples yet: none recorded later either
+		until = time.Unix(0, 0)
+	}
 
 	bw := bufio.NewWriter(w)
 	hb, err := json.Marshal(head)
@@ -54,7 +63,7 @@ func (s *Store) WriteSnapshot(w io.Writer) error {
 		s.mu.RLock()
 		defer s.mu.RUnlock()
 		if e, ok := s.pods[k]; ok {
-			return podSnapshot(e), true
+			return podSnapshot(e, until), true
 		}
 		return nil, false
 	}); err != nil {
@@ -64,7 +73,7 @@ func (s *Store) WriteSnapshot(w io.Writer) error {
 		s.mu.RLock()
 		defer s.mu.RUnlock()
 		if e, ok := s.nodes[n]; ok {
-			return nodeSnapshot(e), true
+			return nodeSnapshot(e, until), true
 		}
 		return nil, false
 	}); err != nil {
@@ -139,6 +148,9 @@ func (s *Store) ReadSnapshot(r io.Reader) (SnapshotInfo, error) {
 			return info, err
 		}
 		var n int
+		if headMerged && isHeader(tok) {
+			return info, fmt.Errorf("snapshot %v after its samples", tok)
+		}
 		switch tok {
 		case "takenAt":
 			err = dec.Decode(&head.TakenAt)
@@ -188,6 +200,16 @@ func (s *Store) ReadSnapshot(r io.Reader) (SnapshotInfo, error) {
 	return info, nil
 }
 
+// isHeader reports whether a snapshot member is part of the header, which
+// every writer puts before the samples it is needed to slot.
+func isHeader(key json.Token) bool {
+	switch key {
+	case "takenAt", "interval", "timeline", "retention", "newest":
+		return true
+	}
+	return false
+}
+
 // eachElement reads a JSON array (or null), calling each with the decoder
 // on every element; each must consume it.
 func eachElement(dec *json.Decoder, each func() error) (int, error) {
@@ -208,6 +230,7 @@ func eachElement(dec *json.Decoder, each func() error) (int, error) {
 	return n, expect(dec, ']')
 }
 
+// expect reads the delimiter d; the end of the input is an unexpected EOF.
 func expect(dec *json.Decoder, d json.Delim) error {
 	tok, err := dec.Token()
 	if err == nil && tok != d {

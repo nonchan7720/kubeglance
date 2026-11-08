@@ -432,10 +432,10 @@ func (s *Store) Snapshot() Snapshot {
 	h := s.head()
 	snap := Snapshot{TakenAt: h.TakenAt, Interval: h.Interval, Timeline: h.Timeline, Retention: h.Retention, Newest: h.Newest}
 	for _, e := range s.pods {
-		snap.Pods = append(snap.Pods, podSnapshot(e))
+		snap.Pods = append(snap.Pods, podSnapshot(e, time.Time{}))
 	}
 	for _, e := range s.nodes {
-		snap.Nodes = append(snap.Nodes, nodeSnapshot(e))
+		snap.Nodes = append(snap.Nodes, nodeSnapshot(e, time.Time{}))
 	}
 	return snap
 }
@@ -456,19 +456,35 @@ func (s *Store) head() snapshotHead {
 	return h
 }
 
-func podSnapshot(e *entry[PodInfo]) PodSnapshot {
-	ps := PodSnapshot{Info: e.info, HasInfo: e.hasInfo, DeletedAt: e.deletedAt, Samples: e.series.All()}
+// podSnapshot copies one pod, its samples up to until (all of them when
+// until is zero); the caller holds the lock.
+func podSnapshot(e *entry[PodInfo], until time.Time) PodSnapshot {
+	ps := PodSnapshot{Info: e.info, HasInfo: e.hasInfo, DeletedAt: e.deletedAt, Samples: upTo(e.series.All(), until)}
 	if len(e.containers) > 0 {
 		ps.Containers = make(map[string][]Sample, len(e.containers))
 		for name, c := range e.containers {
-			ps.Containers[name] = c.All()
+			ps.Containers[name] = upTo(c.All(), until)
 		}
 	}
 	return ps
 }
 
-func nodeSnapshot(e *entry[NodeInfo]) NodeSnapshot {
-	return NodeSnapshot{Info: e.info, HasInfo: e.hasInfo, DeletedAt: e.deletedAt, Samples: e.series.All()}
+// nodeSnapshot is podSnapshot for a node.
+func nodeSnapshot(e *entry[NodeInfo], until time.Time) NodeSnapshot {
+	return NodeSnapshot{Info: e.info, HasInfo: e.hasInfo, DeletedAt: e.deletedAt, Samples: upTo(e.series.All(), until)}
+}
+
+// upTo returns the samples (oldest first) at or before until; all of them
+// when until is zero.
+func upTo(xs []Sample, until time.Time) []Sample {
+	if until.IsZero() {
+		return xs
+	}
+	n := len(xs)
+	for n > 0 && xs[n-1].At.After(until) {
+		n--
+	}
+	return xs[:n]
 }
 
 // Merge adds a snapshot to the store: incoming samples are moved to their
@@ -512,6 +528,7 @@ func (s *Store) mergeTimeline(tl Timeline, interval time.Duration, last time.Tim
 	s.resize()
 }
 
+// mergePod merges one pod of a snapshot under the write lock.
 func (s *Store) mergePod(p PodSnapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -523,6 +540,7 @@ func (s *Store) mergePod(p PodSnapshot) {
 	}
 }
 
+// mergeNode merges one node of a snapshot under the write lock.
 func (s *Store) mergeNode(n NodeSnapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

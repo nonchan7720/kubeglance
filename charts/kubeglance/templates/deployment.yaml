@@ -56,9 +56,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
-            # the memory limit in bytes: the Go runtime keeps its heap under
-            # 90 % of it (garbage would otherwise grow past it during a peer
-            # copy); without a limit this is the node's allocatable memory
+            # the memory limit in bytes: 90 % of it becomes the Go runtime's
+            # soft memory limit, so the GC collects harder before garbage
+            # (e.g. during a peer copy) reaches it; not a cap on live memory.
+            # Without a limit this is the node's allocatable memory
             - name: KUBEGLANCE_MEMORY_LIMIT
               valueFrom:
                 resourceFieldRef:

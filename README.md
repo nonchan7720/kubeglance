@@ -109,7 +109,7 @@ On top of that come the Go runtime, the HTTP server and the client-go caches (10
 
 There is no downsampling: every statistic, over any window, is computed from the raw samples. Memory therefore grows linearly with `--retention`; when you raise it, raise `resources.limits.memory` with it (for example `retention: 7d` with 100 pods: ~65 MB of history plus the runtime, so `limits.memory: 192Mi`).
 
-Handing the history to a starting replica costs a few MB, not a second copy of it: the snapshot is streamed a pod at a time on both ends. The chart passes the memory limit to the Go runtime, which keeps its heap under 90 % of it.
+Handing the history to a starting replica costs a few MB, not a second copy of it: the snapshot is streamed a pod at a time on both ends. The chart also passes the memory limit to the Go runtime as a soft limit of 90 %, so the garbage collector works harder before garbage reaches the container limit. It is not a cap: the history itself is live memory, so size `limits.memory` from the table above.
 
 ## How updates keep the history
 

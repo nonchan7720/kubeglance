@@ -188,3 +188,64 @@ func TestWriteSnapshotReportsAWriteError(t *testing.T) {
 		t.Error("no error from a failing writer")
 	}
 }
+
+// recordOnFirstWrite records a round into the store the first time the
+// snapshot reaches the writer: the collector keeps running while a peer
+// copies.
+type recordOnFirstWrite struct {
+	buf   bytes.Buffer
+	store *Store
+	round Round
+	done  bool
+}
+
+func (r *recordOnFirstWrite) Write(p []byte) (int, error) {
+	if !r.done {
+		r.done = true
+		r.store.SetInterval(5*time.Second, at(3600))
+		r.store.Record(r.round)
+	}
+	return r.buf.Write(p)
+}
+
+func TestWriteSnapshotStopsAtItsHeader(t *testing.T) {
+	// a round recorded (here after a change of interval) while the snapshot
+	// is being written is not in it: the header's timeline and newest
+	// describe every sample sent, as when the snapshot was taken at once
+	s := NewStore(15*time.Second, time.Hour)
+	next := Round{At: at(3610), Pods: map[PodKey]Resource{}}
+	for i := range 240 {
+		r := Round{At: at(i * 15), Pods: map[PodKey]Resource{}}
+		for p := range 50 {
+			k := PodKey{"ns", string(rune('a'+p%26)) + string(rune('a'+p/26))}
+			r.Pods[k] = Resource{CPU: int64(p)}
+			next.Pods[k] = Resource{CPU: 999}
+		}
+		s.Record(r)
+	}
+	w := &recordOnFirstWrite{store: s, round: next}
+	if err := s.WriteSnapshot(w); err != nil {
+		t.Fatal(err)
+	}
+	var got Snapshot
+	if err := json.Unmarshal(w.buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Newest.Equal(at(3585)) || len(got.Timeline) != 1 {
+		t.Fatalf("header: newest %v timeline %v", got.Newest, got.Timeline)
+	}
+	for _, p := range got.Pods {
+		if last := p.Samples[len(p.Samples)-1]; last.At.After(got.Newest) {
+			t.Fatalf("pod %v has a sample at %v, after the header's newest %v", p.Info.Key, last.At, got.Newest)
+		}
+	}
+}
+
+func TestReadSnapshotRejectsAHeaderAfterTheSamples(t *testing.T) {
+	// every writer puts the header first; one after the samples would have
+	// been needed to slot them, so it is an error, not silently ignored
+	in := `{"pods":[],"timeline":[{"since":"0001-01-01T00:00:00Z","step":30000000000}]}`
+	if _, err := NewStore(15*time.Second, time.Minute).ReadSnapshot(strings.NewReader(in)); err == nil {
+		t.Error("no error for a timeline after the pods")
+	}
+}
