@@ -4,11 +4,11 @@ golangci-lint = "go:github.com/golangci/golangci-lint/v2/cmd/golangci-lint"
 [tools]
 go = "1.27.3"
 golangci-lint = "2.15.0"
-helm = "3.19.0"
-"aqua:goreleaser/goreleaser" = "2.12.5"
+helm = "3.22.1"
+"aqua:goreleaser/goreleaser" = "2.20.0"
 # dependency-graph analysis (.depgraph.yml): the claude-hook-gate session_start /
 # gate entries and CI (depgraph:ci) use it
-"github:nonchan7720/depgraph" = "0.1.7"
+"github:nonchan7720/depgraph" = "0.1.9"
 # THIRD_PARTY_NOTICES.md (mise run notices; CI checks it is current)
 "go:github.com/google/go-licenses/v2" = "2.0.1"
 # end-to-end tests on a kind cluster (mise run e2e)
