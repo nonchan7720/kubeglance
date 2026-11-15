@@ -4,7 +4,7 @@
 services:
   neo4j:
     profiles: ["depgraph"]
-    image: neo4j:5.26.32@sha256:249a1ec6e3c52d82101a5ed33d6ed2b5ed5b0017b21a28c0bfebc335e87fb177
+    image: neo4j:5.26.32@sha256:42ef3ebfd671ebd01fdebb6dcbe80cf7b45eef2aa3d346ef4132f7ef31e67d2f
     container_name: kubeglance-neo4j
     ports:
       - "127.0.0.1:27474:7474" # browser UI
