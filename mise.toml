@@ -8,7 +8,7 @@ helm = "3.22.1"
 "aqua:goreleaser/goreleaser" = "2.20.0"
 # dependency-graph analysis (.depgraph.yml): the claude-hook-gate session_start /
 # gate entries and CI (depgraph:ci) use it
-"github:nonchan7720/depgraph" = "0.1.9"
+"github:nonchan7720/depgraph" = "0.1.11"
 # THIRD_PARTY_NOTICES.md (mise run notices; CI checks it is current)
 "go:github.com/google/go-licenses/v2" = "2.0.1"
 # end-to-end tests on a kind cluster (mise run e2e)
