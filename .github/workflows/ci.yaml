@@ -16,7 +16,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Set up tools
-        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
       - name: Run lint
         # govet, staticcheck, modernize, ... (.golangci.yml); the binary is the
         # one mise pins, hence install-mode none
@@ -45,7 +45,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up tools
-        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
       - name: Run e2e
         run: mise run e2e
 
@@ -56,7 +56,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up tools
-        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
       - run: mise run helm:lint
 
   depgraph:
@@ -68,7 +68,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up tools
-        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
       - name: Run depgraph
         run: mise run depgraph:ci
       - name: Shutdown dependencies
