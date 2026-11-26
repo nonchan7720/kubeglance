@@ -25,7 +25,7 @@ jobs:
       # A GitHub App token, not GITHUB_TOKEN: PRs opened by GITHUB_TOKEN do
       # not trigger CI, and Actions may not be allowed to open PRs at all.
       - name: Setup app token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         id: generate-token
         with:
           client-id: ${{ secrets.RELEASE_PLEASE_CLIENT_ID }}
@@ -61,7 +61,7 @@ jobs:
           SHORT_SHA=$(git rev-parse --short HEAD)
           git tag "v${BASE}-dev.${SHORT_SHA}"
       - name: Setup app token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         id: generate-token
         with:
           client-id: ${{ secrets.RELEASE_PLEASE_CLIENT_ID }}
